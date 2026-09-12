@@ -63,6 +63,11 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
         Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
         Ok("focus") => editor.select_text_in_block(3, 5..5, window, cx),
         Ok("gutter") => editor.show_gutter_always(),
+        Ok("table") => {
+            editor.show_gutter_always();
+            editor.select_text_in_block(1, 0..0, window, cx);
+            editor.insert_table(3, 3, window, cx);
+        }
         Ok("comment") => {
             editor.select_text_in_block(3, 0..12, window, cx);
             editor.add_comment(window, cx);

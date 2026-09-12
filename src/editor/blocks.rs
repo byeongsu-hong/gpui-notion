@@ -7,12 +7,15 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::Editor;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{ActiveTheme, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, img, px, relative,
 };
+
+use gpui_kit::TestSupportExt as _;
 
 use super::block::{
     BlockAttrs, BlockCaps, BlockContext, BlockInputRule, BlockLayout, BlockRegistry, BlockSpec,
@@ -33,6 +36,7 @@ pub fn init(cx: &mut App) {
     BlockRegistry::register(cx, Image);
     BlockRegistry::register(cx, Callout);
     BlockRegistry::register(cx, Toggle);
+    BlockRegistry::register(cx, Table);
 }
 
 // ------------------------------------------------------------------ paragraph
@@ -931,3 +935,221 @@ pub fn relative_line_height(layout: &BlockLayout) -> gpui_kit::DefiniteLength {
 
 /// Re-exported so specs in other crates can size themselves like the built-ins.
 pub use style::TEXT_SIZE as BASE_TEXT_SIZE;
+
+// ---------------------------------------------------------------------- table
+
+/// A table of text cells. The block itself holds no text: its content lives
+/// in the [`CellGrid`](super::grid::CellGrid) the editor keeps beside it.
+pub struct Table;
+
+/// How wide a column has to be before its text wraps.
+const CELL_MIN_WIDTH: gpui_kit::Pixels = px(120.);
+/// Rows are a fixed height so the controls beside them line up with them.
+const CELL_HEIGHT: gpui_kit::Pixels = px(30.);
+const ROW_HEIGHT: gpui_kit::Pixels = px(35.);
+
+impl BlockSpec for Table {
+    fn type_name(&self) -> &'static str {
+        types::TABLE
+    }
+
+    fn label(&self, _: &BlockAttrs) -> SharedString {
+        "Table".into()
+    }
+
+    fn caps(&self) -> BlockCaps {
+        BlockCaps::grid()
+    }
+
+    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+        BlockLayout {
+            margin_top: px(24.),
+            margin_bottom: px(8.),
+            ..Default::default()
+        }
+    }
+
+    fn render_body(
+        &self,
+        ctx: &BlockContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let grid = ctx.grid?;
+        let id = ctx.id;
+        let columns = grid.columns();
+        let rows: Vec<AnyElement> = (0..grid.rows())
+            .map(|row| render_row(ctx, grid, row, columns, window, cx))
+            .collect();
+
+        let row_controls: Vec<AnyElement> = (0..grid.rows())
+            .map(|row| row_control(ctx, row, cx))
+            .collect();
+
+        Some(
+            h_flex()
+                .id(("table", id.0 as usize))
+                .items_start()
+                .gap(px(2.))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .rounded(px(6.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .when(ctx.selected, |this| this.border_color(cx.theme().primary))
+                        .children(rows)
+                        .child(add_row_button(ctx, cx)),
+                )
+                // Row and column controls sit outside the table's frame, the
+                // way Notion keeps them out of the data.
+                .child(v_flex().flex_none().pt(px(1.)).children(row_controls))
+                .child(add_column_button(ctx, cx))
+                .into_any_element(),
+        )
+    }
+
+    fn slash_items(&self) -> Vec<SlashItem> {
+        vec![SlashItem {
+            title: "Table",
+            subtext: "Insert a table",
+            keywords: &["table", "grid", "rows", "columns"],
+            group: "Insert",
+            icon: "table",
+            run: |editor, window, cx| editor.insert_table(3, 3, window, cx),
+        }]
+    }
+}
+
+fn render_row(
+    _ctx: &BlockContext,
+    grid: &super::grid::CellGrid,
+    row: usize,
+    columns: usize,
+    _window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let header = row == 0;
+    let cells: Vec<AnyElement> = (0..columns)
+        .filter_map(|column| {
+            let cell = grid.cell(super::grid::CellPosition::new(row, column))?;
+            Some(
+                div()
+                    .flex_1()
+                    .min_w(CELL_MIN_WIDTH)
+                    .px(px(4.))
+                    .py(px(2.))
+                    .when(column + 1 < columns, |this| {
+                        this.border_r_1().border_color(cx.theme().border)
+                    })
+                    .child(
+                        Editor::new(cell.state())
+                            .appearance(false)
+                            .bordered(false)
+                            .h(CELL_HEIGHT)
+                            .text_size(px(15.))
+                            .font_family(cx.theme().font_family.clone())
+                            .when(header, |this| this.font_weight(FontWeight::SEMIBOLD)),
+                    )
+                    .into_any_element(),
+            )
+        })
+        .collect();
+
+    h_flex()
+        .w_full()
+        .h(ROW_HEIGHT)
+        .items_stretch()
+        .when(header, |this| this.bg(cx.theme().muted.opacity(0.5)))
+        .when(row + 1 <= grid.rows(), |this| {
+            this.border_b_1().border_color(cx.theme().border)
+        })
+        .children(cells)
+        .into_any_element()
+}
+
+/// The control beside a row that takes the row away.
+fn row_control(ctx: &BlockContext, row: usize, _cx: &mut App) -> AnyElement {
+    let id = ctx.id;
+    let editor = ctx.editor.clone();
+    div()
+        .w(px(22.))
+        .h(ROW_HEIGHT)
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(!ctx.reveal_controls, |this| {
+            this.invisible()
+                .group_hover(super::view::group_name(id), |this| this.visible())
+        })
+        .child(
+            Button::new(("drop-row", row))
+                .ghost()
+                .xsmall()
+                .icon(super::ui::Lucide("x"))
+                .tooltip("Delete row")
+                .on_click(move |_, window, cx| {
+                    let _ = editor.update(cx, |editor, cx| editor.remove_row(id, row, window, cx));
+                }),
+        )
+        .into_any_element()
+}
+
+fn add_row_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
+    let id = ctx.id;
+    let editor = ctx.editor.clone();
+    let rows = ctx.grid.map(super::grid::CellGrid::rows).unwrap_or(1);
+    div()
+        .w_full()
+        .h(px(20.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(cx.theme().muted_foreground)
+        .when(!ctx.reveal_controls, |this| {
+            this.invisible()
+                .group_hover(super::view::group_name(id), |this| this.visible())
+        })
+        .hover(|this| this.bg(cx.theme().muted.opacity(0.6)))
+        .child(super::ui::icon("plus", px(14.), cx.theme().muted_foreground))
+        .id(("add-row", id.0 as usize))
+        .test_support()
+        .on_click(move |_, window, cx| {
+            let _ = editor.update(cx, |editor, cx| {
+                editor.insert_row(id, rows.saturating_sub(1), window, cx)
+            });
+        })
+        .into_any_element()
+}
+
+fn add_column_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
+    let id = ctx.id;
+    let editor = ctx.editor.clone();
+    let columns = ctx.grid.map(super::grid::CellGrid::columns).unwrap_or(1);
+    div()
+        .flex_none()
+        .w(px(20.))
+        .h(px(32.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .rounded(px(4.))
+        .text_color(cx.theme().muted_foreground)
+        .when(!ctx.reveal_controls, |this| {
+            this.invisible()
+                .group_hover(super::view::group_name(id), |this| this.visible())
+        })
+        .hover(|this| this.bg(cx.theme().muted.opacity(0.6)))
+        .child(super::ui::icon("plus", px(14.), cx.theme().muted_foreground))
+        .id(("add-column", id.0 as usize))
+        .test_support()
+        .on_click(move |_, window, cx| {
+            let _ = editor.update(cx, |editor, cx| {
+                editor.insert_column(id, columns.saturating_sub(1), window, cx)
+            });
+        })
+        .into_any_element()
+}

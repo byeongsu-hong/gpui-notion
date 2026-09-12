@@ -352,6 +352,39 @@ impl NotionEditor {
         self.toggle_node(types::CALLOUT, BlockAttrs::default(), window, cx);
     }
 
+    /// Put a table under the caret and start typing in its first cell.
+    pub fn insert_table(
+        &mut self,
+        rows: usize,
+        columns: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.record(Step::Structural, cx);
+        let at = match self.active_index() {
+            // An empty paragraph makes room for the table rather than
+            // hanging around above it.
+            Some(ix) if self.block_is_empty_paragraph(ix) => {
+                let id = self.blocks[ix].id;
+                self.remove_block(id, cx);
+                ix
+            }
+            Some(ix) => ix + 1,
+            None => self.blocks.len(),
+        };
+
+        let id = self.insert_block(
+            at,
+            BlockContent::new(types::TABLE, String::new()),
+            window,
+            cx,
+        );
+        self.create_grid(id, rows.max(1), columns.max(1), window, cx);
+        self.focus_cell(id, super::grid::CellPosition::new(0, 0), window, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
     pub fn toggle_check(&mut self, id: BlockId, cx: &mut Context<Self>) {
         self.record(Step::Structural, cx);
         let Some(block) = self.block_mut(id) else {

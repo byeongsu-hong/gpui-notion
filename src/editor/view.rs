@@ -44,6 +44,10 @@ pub struct NotionEditor {
     pub(crate) block_bounds: HashMap<BlockId, Bounds<Pixels>>,
     /// The block a press started in, which anchors a drag selection.
     pub(crate) mouse_anchor: Option<BlockId>,
+    /// Child text areas of blocks that hold a grid, keyed by block.
+    pub(crate) grids: HashMap<BlockId, super::grid::CellGrid>,
+    /// Which cell has the caret, when one does.
+    pub(crate) focused_cell: Option<(BlockId, super::grid::CellPosition)>,
     /// Comment threads, and which one is on screen.
     pub(crate) comments: Vec<super::comments::Thread>,
     pub(crate) next_thread_id: u64,
@@ -75,6 +79,8 @@ impl NotionEditor {
             always_show_gutter: false,
             block_bounds: HashMap::new(),
             mouse_anchor: None,
+            grids: HashMap::new(),
+            focused_cell: None,
             comments: Vec::new(),
             next_thread_id: 1,
             open_thread: None,
@@ -141,7 +147,9 @@ impl NotionEditor {
     /// A block input takes focus from a click without the editor hearing
     /// about it, so the window is the authority on which block is active and
     /// the field below is a cache of it, refreshed each frame.
-    pub(crate) fn refresh_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Reads which block input the window is focused on, and answers whether
+    /// one of them holds the caret at all.
+    pub(crate) fn refresh_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         use gpui_kit::Focusable as _;
         let focused = self
             .blocks
@@ -149,11 +157,12 @@ impl NotionEditor {
             .find(|block| block.state.focus_handle(cx).is_focused(window))
             .map(|block| block.id);
         if focused.is_none() || focused == self.focused {
-            return;
+            return focused.is_some();
         }
         self.focused = focused;
         self.selected.clear();
         self.sync_placeholders(window, cx);
+        true
     }
 
     /// Hint the block being written in, and any block that always hints.
@@ -350,6 +359,9 @@ impl NotionEditor {
 
         let ix = ix.min(self.blocks.len());
         self.blocks.insert(ix, block);
+        if BlockRegistry::global(cx).get(&self.blocks[ix].ty).caps().grid {
+            self.restore_grid(id, window, cx);
+        }
         self.remeasure(id, cx);
         self.apply_decorations(id, cx);
         cx.emit(DocumentChanged);
@@ -696,6 +708,8 @@ impl NotionEditor {
         BlockContext {
             id: block.id,
             ix,
+            grid: self.grids.get(&block.id),
+            reveal_controls: self.always_show_gutter,
             attrs: &block.attrs,
             text: &block.text,
             indent: block.indent,
@@ -932,7 +946,8 @@ impl Focusable for NotionEditor {
 
 impl Render for NotionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.refresh_focus(window, cx);
+        let in_a_block = self.refresh_focus(window, cx);
+        self.refresh_focused_cell(in_a_block, window, cx);
         // Block bounds are re-reported by every block that lays out this
         // frame, so blocks that went away leave nothing behind.
         self.block_bounds.clear();

@@ -2,9 +2,9 @@
 //! markdown rules, marks and the slash menu — all through the real UI.
 
 use gpui_kit::component::Root;
-use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
+use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, px, size};
-use gpui_notion::editor::{self, MarkKind, NotionEditor, types};
+use gpui_notion::editor::{self, CellPosition, MarkKind, NotionEditor, types};
 
 struct Harness {
     editor: Entity<NotionEditor>,
@@ -983,4 +983,139 @@ fn resolving_a_thread_takes_the_highlight_off(cx: &mut TestAppContext) {
         assert!(editor.content()[0].marks.is_empty());
         assert!(editor.open_thread().is_none());
     });
+}
+
+#[gpui_kit::test]
+fn the_slash_menu_inserts_a_table_and_tab_walks_its_cells(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+
+    let (ty, rows, columns) = cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let id = editor.block_id_at(0).expect("a table block");
+        let grid = editor.grid(id).expect("a grid beside it");
+        (editor.content()[0].ty.to_string(), grid.rows(), grid.columns())
+    });
+    assert_eq!(ty, types::TABLE);
+    assert_eq!((rows, columns), (3, 3));
+
+    // The caret starts in the header cell; Tab walks across the row.
+    harness.type_text("Name", cx);
+    harness.press("tab", cx);
+    harness.type_text("Role", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let id = editor.block_id_at(0).unwrap();
+        let grid = editor.grid(id).unwrap();
+        assert_eq!(grid.cell(CellPosition::new(0, 0)).unwrap().text(), "Name");
+        assert_eq!(grid.cell(CellPosition::new(0, 1)).unwrap().text(), "Role");
+    });
+}
+
+#[gpui_kit::test]
+fn tab_in_the_last_cell_adds_a_row(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+    // Walk to the last cell: 3 x 3 - 1 tabs.
+    for _ in 0..8 {
+        harness.press("tab", cx);
+    }
+    harness.press("tab", cx);
+
+    let rows = cx.update(|cx| harness.editor.read(cx).grid(id).unwrap().rows());
+    assert_eq!(rows, 4);
+}
+
+#[gpui_kit::test]
+fn a_table_survives_undo_and_redo_with_its_text(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    harness.type_text("Kept", cx);
+
+    harness.press("secondary-z", cx);
+    harness.press("secondary-shift-z", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let id = editor.block_id_at(0).expect("the table is back");
+        let grid = editor.grid(id).expect("with a grid");
+        assert_eq!(grid.cell(CellPosition::new(0, 0)).unwrap().text(), "Kept");
+    });
+}
+
+#[gpui_kit::test]
+fn a_table_grows_and_shrinks_by_row_and_column(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+
+    // Type in the header so the shape is observable after the edits.
+    harness.type_text("A", cx);
+    harness.press("tab", cx);
+    harness.type_text("B", cx);
+
+    // The controls show while the pointer is over the table.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", id.0 as usize), cx);
+        window.render_frame(cx);
+        window.click(("add-column", id.0 as usize), cx);
+        window.render_frame(cx);
+        window.hover(("block", id.0 as usize), cx);
+        window.render_frame(cx);
+        window.click(("add-row", id.0 as usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let (rows, columns) = cx.update(|cx| {
+        let grid = harness.editor.read(cx).grid(id).unwrap();
+        (grid.rows(), grid.columns())
+    });
+    assert_eq!((rows, columns), (4, 4));
+
+    // The row control beside the first row takes that row away.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", id.0 as usize), cx);
+        window.render_frame(cx);
+        window.click(("drop-row", 0usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let (rows, header) = cx.update(|cx| {
+        let grid = harness.editor.read(cx).grid(id).unwrap();
+        (
+            grid.rows(),
+            grid.cell(CellPosition::new(0, 0)).unwrap().text().to_string(),
+        )
+    });
+    assert_eq!(rows, 3);
+    assert_eq!(header, "", "the row carrying A was the one removed");
+}
+
+#[gpui_kit::test]
+fn a_table_copies_as_a_markdown_table(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    harness.type_text("Name", cx);
+    harness.press("tab", cx);
+    harness.type_text("Role", cx);
+
+    harness.press("escape", cx);
+    let markdown = cx.update(|cx| harness.editor.read(cx).selected_markdown(cx));
+    assert!(
+        markdown.starts_with("| Name | Role |"),
+        "unexpected markdown: {markdown}"
+    );
+    assert!(markdown.contains("| --- | --- |"));
 }

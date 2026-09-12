@@ -38,6 +38,7 @@ pub mod types {
     pub const IMAGE: &str = "image";
     pub const CALLOUT: &str = "callout";
     pub const TOGGLE: &str = "details";
+    pub const TABLE: &str = "table";
 }
 
 /// Attributes of a block. The named fields cover the built-in node types;
@@ -101,6 +102,8 @@ pub struct BlockCaps {
     pub lifts_when_empty: bool,
     /// Enter inserts a newline instead of splitting the block.
     pub multiline: bool,
+    /// The editor keeps a grid of child text areas beside the block.
+    pub grid: bool,
 }
 
 impl Default for BlockCaps {
@@ -112,6 +115,7 @@ impl Default for BlockCaps {
             list: false,
             lifts_when_empty: false,
             multiline: false,
+            grid: false,
         }
     }
 }
@@ -122,6 +126,18 @@ impl BlockCaps {
             textual: false,
             marks: false,
             input_rules: false,
+            ..Default::default()
+        }
+    }
+
+    /// A block whose content lives in child cells rather than in its own
+    /// input — what a table is.
+    pub fn grid() -> Self {
+        Self {
+            textual: false,
+            marks: false,
+            input_rules: false,
+            grid: true,
             ..Default::default()
         }
     }
@@ -213,6 +229,10 @@ pub struct BlockContext<'a> {
     pub selected: bool,
     /// Position within a run of list items at the same indent, 1-based.
     pub ordinal: usize,
+    /// Child text areas, for specs whose caps ask for a grid.
+    pub grid: Option<&'a super::grid::CellGrid>,
+    /// Review aid: draw hover-only controls as if the pointer were here.
+    pub reveal_controls: bool,
     pub editor: WeakEntity<NotionEditor>,
 }
 

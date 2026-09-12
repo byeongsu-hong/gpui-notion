@@ -71,6 +71,7 @@ impl NotionEditor {
             .get(&block.ty)
             .label(&block.attrs);
         let focus = self.focus_handle_for_editor();
+        let is_table = BlockRegistry::global(cx).get(&block.ty).caps().grid;
         // Centre the controls on the block's first line.
         let top = (layout.line_height_px() - px(24.)).max(px(0.)) / 2.;
 
@@ -113,7 +114,7 @@ impl NotionEditor {
                     text,
                 )
                 .dropdown_menu(move |menu, window, cx| {
-                    block_menu(id, label.clone(), focus.clone(), menu, window, cx)
+                    block_menu(id, label.clone(), focus.clone(), is_table, menu, window, cx)
                 }),
             )
             .into_any_element()
@@ -215,6 +216,7 @@ fn block_menu(
     id: BlockId,
     label: gpui_kit::SharedString,
     focus: gpui_kit::FocusHandle,
+    is_table: bool,
     menu: PopupMenu,
     window: &mut Window,
     cx: &mut Context<PopupMenu>,
@@ -222,8 +224,24 @@ fn block_menu(
     let _ = id;
     let turn_into_focus = focus.clone();
     let color_focus = focus.clone();
-    menu.action_context(focus)
-        .label(label)
+    let table_focus = focus.clone();
+    let mut menu = menu.action_context(focus).label(label);
+    if is_table {
+        menu = menu.submenu("Table", window, cx, {
+            let focus = table_focus.clone();
+            move |menu, _, _| {
+                menu.action_context(focus.clone())
+                    .menu("Insert row above", Box::new(actions::InsertRowAbove))
+                    .menu("Insert row below", Box::new(actions::InsertRowBelow))
+                    .menu("Insert column left", Box::new(actions::InsertColumnLeft))
+                    .menu("Insert column right", Box::new(actions::InsertColumnRight))
+                    .separator()
+                    .menu("Delete row", Box::new(actions::DeleteRow))
+                    .menu("Delete column", Box::new(actions::DeleteColumn))
+            }
+        });
+    }
+    menu
         .menu("Comment", Box::new(actions::AddComment))
         .submenu("Color", window, cx, {
             let focus = color_focus.clone();

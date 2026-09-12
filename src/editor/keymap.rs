@@ -181,6 +181,24 @@ impl NotionEditor {
             .on_action(cx.listener(|this, _: &actions::CopyBlock, _window, cx| {
                 this.copy_active_block(cx)
             }))
+            .on_action(cx.listener(|this, _: &actions::InsertRowAbove, window, cx| {
+                this.insert_row_at_caret(false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::InsertRowBelow, window, cx| {
+                this.insert_row_at_caret(true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::InsertColumnLeft, window, cx| {
+                this.insert_column_at_caret(false, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::InsertColumnRight, window, cx| {
+                this.insert_column_at_caret(true, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::DeleteRow, window, cx| {
+                this.delete_row_at_caret(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::DeleteColumn, window, cx| {
+                this.delete_column_at_caret(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &actions::AddComment, window, cx| {
                 this.add_comment(window, cx)
             }))
@@ -211,6 +229,10 @@ impl NotionEditor {
     // ------------------------------------------------------------- handlers
 
     fn on_enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         if self.comment_draft_is_open() {
             // The comment box owns Enter; it posts what was typed.
             return;
@@ -252,6 +274,10 @@ impl NotionEditor {
     }
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -271,6 +297,10 @@ impl NotionEditor {
     }
 
     fn on_delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -290,6 +320,10 @@ impl NotionEditor {
     }
 
     fn on_move_up(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -309,6 +343,10 @@ impl NotionEditor {
     }
 
     fn on_move_down(&mut self, _: &MoveDown, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -336,6 +374,10 @@ impl NotionEditor {
     }
 
     fn on_move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -351,6 +393,10 @@ impl NotionEditor {
     }
 
     fn on_move_right(&mut self, _: &MoveRight, window: &mut Window, cx: &mut Context<Self>) {
+        // A table cell is its own text area; the document keeps out of it.
+        if self.focused_cell().is_some() {
+            return;
+        }
         // While a popover owns the keyboard, the document keeps its hands off.
         if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
@@ -375,6 +421,12 @@ impl NotionEditor {
             cx.stop_propagation();
             return;
         }
+        if self.focused_cell().is_some() {
+            if self.move_cell(1, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         if self.spec_at(ix, cx).caps().multiline {
             return;
@@ -392,6 +444,12 @@ impl NotionEditor {
         if self.suggestion_is_open() {
             self.move_suggestion_selection(-1, cx);
             cx.stop_propagation();
+            return;
+        }
+        if self.focused_cell().is_some() {
+            if self.move_cell(-1, window, cx) {
+                cx.stop_propagation();
+            }
             return;
         }
         let Some(ix) = self.active_index() else { return };
@@ -460,6 +518,12 @@ impl NotionEditor {
         if !self.selected.is_empty() {
             self.selected.clear();
             cx.notify();
+            return;
+        }
+        // Escape out of a table cell selects the table itself.
+        if let Some((block, _)) = self.focused_cell() {
+            self.select_block_as_node(block, window, cx);
+            cx.stop_propagation();
             return;
         }
         // Escape with a caret selects the block as a node, as Notion does.

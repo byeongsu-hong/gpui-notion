@@ -147,6 +147,9 @@ impl NotionEditor {
                     }
                     types::BLOCKQUOTE => "> ".to_string(),
                     types::HORIZONTAL_RULE => return "---".to_string(),
+                    types::TABLE => {
+                        return self.grid_markdown(block.id).unwrap_or_default();
+                    }
                     types::CODE_BLOCK => {
                         let language = block.attrs.language.clone().unwrap_or_default();
                         return format!("```{language}\n{}\n```", block.text);
