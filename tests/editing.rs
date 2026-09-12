@@ -1206,3 +1206,26 @@ fn duplicating_a_selection_copies_every_block_below_it(cx: &mut TestAppContext) 
     assert_eq!(harness.texts(cx), vec!["one", "two", "one", "two"]);
     assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 2);
 }
+
+#[gpui_kit::test]
+fn the_comment_box_takes_the_toolbar_off_screen(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one line", cx);
+    harness.press("secondary-a", cx);
+    assert!(
+        cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)),
+        "a selection shows the toolbar"
+    );
+
+    harness.press("secondary-shift-m", cx);
+    assert!(
+        !cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)),
+        "the comment box replaces it"
+    );
+
+    harness.press("escape", cx);
+    assert!(
+        cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)),
+        "cancelling the comment gives the selection, and the toolbar, back"
+    );
+}

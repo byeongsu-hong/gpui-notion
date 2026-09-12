@@ -87,6 +87,9 @@ impl Thread {
 pub struct CommentDraft {
     thread: ThreadId,
     input: Entity<InputState>,
+    /// What was selected when the box opened, so cancelling can hand the
+    /// selection back rather than leaving a bare caret.
+    origin: Option<(BlockId, std::ops::Range<usize>)>,
     _subscription: Subscription,
 }
 
@@ -141,9 +144,12 @@ impl NotionEditor {
             resolved: false,
         });
 
-        self.blocks[ix].marks.add(MarkKind::Comment(id), range);
+        self.blocks[ix].marks.add(MarkKind::Comment(id), range.clone());
         self.apply_decorations(block, cx);
         self.open_comment_draft(id, window, cx);
+        if let Some(draft) = self.comment_draft.as_mut() {
+            draft.origin = Some((block, range));
+        }
         cx.emit(DocumentChanged);
         cx.notify();
     }
@@ -188,6 +194,7 @@ impl NotionEditor {
         self.comment_draft = Some(CommentDraft {
             thread,
             input,
+            origin: None,
             _subscription: subscription,
         });
         cx.notify();
@@ -221,6 +228,10 @@ impl NotionEditor {
     /// Close the popover; a thread nobody commented on is dropped, the way
     /// Notion discards an abandoned comment box.
     pub fn close_comment_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let origin = self
+            .comment_draft
+            .as_ref()
+            .and_then(|draft| draft.origin.clone());
         let Some(thread) = self.open_thread.take() else {
             self.comment_draft = None;
             return;
@@ -233,8 +244,14 @@ impl NotionEditor {
         if empty {
             self.remove_comment_thread(thread, cx);
         }
-        if let Some(id) = self.focused_id() {
-            self.focus_block(id, super::view::Caret::End, window, cx);
+
+        match origin.and_then(|(block, range)| Some((self.index_of(block)?, range))) {
+            Some((ix, range)) => self.select_text_in_block(ix, range, window, cx),
+            None => {
+                if let Some(id) = self.focused_id() {
+                    self.focus_block(id, super::view::Caret::End, window, cx);
+                }
+            }
         }
         cx.notify();
     }

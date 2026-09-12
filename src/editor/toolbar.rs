@@ -33,6 +33,11 @@ impl super::view::NotionEditor {
         if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
+        // A comment box owns the selection while it is open; two surfaces
+        // over one range is one too many.
+        if self.comment_draft_is_open() {
+            return false;
+        }
         // While the button is still down the selection is still being made;
         // the toolbar waits for it to be let go rather than flickering along
         // with the pointer.
