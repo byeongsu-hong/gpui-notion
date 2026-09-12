@@ -7,11 +7,9 @@
 
 use gpui_kit::component::input::{
     Backspace, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight, MoveUp,
-    OutdentInline, Redo, SelectAll, Undo,
+    OutdentInline, Redo, Undo,
 };
-use gpui_kit::base::actions::{SelectDown, SelectUp};
-use gpui_kit::component::input::{Copy, Cut};
-use gpui_kit::{App, Context, Focusable as _, InteractiveElement, Window};
+use gpui_kit::{App, Context, InteractiveElement, Window};
 
 use super::actions;
 use super::block::types;
@@ -174,6 +172,11 @@ impl NotionEditor {
             .on_action(cx.listener(|this, _: &actions::OpenSlashMenu, window, cx| {
                 this.open_slash_menu(window, cx)
             }))
+            .on_action(
+                cx.listener(|this, action: &actions::SetCodeLanguage, window, cx| {
+                    this.set_code_language(action.0, window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &actions::CopyBlock, _window, cx| {
                 this.copy_active_block(cx)
             }))

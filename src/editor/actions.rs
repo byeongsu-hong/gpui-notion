@@ -6,6 +6,11 @@ use serde::Deserialize;
 
 use super::mark::{HighlightColor, TextColor};
 
+/// Setting a code block's language, dispatched by its language menu.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Action)]
+#[action(namespace = notion, no_json)]
+pub struct SetCodeLanguage(pub &'static str);
+
 /// Applying one of the palette colors, dispatched by the color menus.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Action)]
 #[action(namespace = notion, no_json)]

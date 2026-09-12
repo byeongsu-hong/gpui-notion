@@ -6,7 +6,9 @@
 //! [`BlockRegistry::register`].
 
 use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::{ActiveTheme, Sizable as _, h_flex, v_flex};
 use gpui_kit::{
     AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, img, px, relative,
@@ -146,7 +148,9 @@ impl BlockSpec for Heading {
 
 fn list_layout() -> BlockLayout {
     BlockLayout {
-        margin_top: px(2.),
+        // A list gets air above it; items inside it sit tight together,
+        // which `collapse_with_siblings` takes care of.
+        margin_top: px(20.),
         leading_width: px(24.),
         collapse_with_siblings: true,
         ..Default::default()
@@ -531,15 +535,48 @@ impl BlockSpec for CodeBlock {
         }
     }
 
-    fn wrap(&self, _: &BlockContext, content: AnyElement, _: &mut Window, cx: &mut App) -> AnyElement {
+    fn wrap(&self, ctx: &BlockContext, content: AnyElement, _: &mut Window, cx: &mut App) -> AnyElement {
+        let language = ctx
+            .attrs
+            .language
+            .clone()
+            .unwrap_or(SharedString::new_static("plain text"));
+
         v_flex()
             .w_full()
+            .relative()
             .p(px(16.))
             .rounded(px(6.))
             .border_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().muted.opacity(0.5))
             .child(content)
+            .child(
+                // The language sits in the corner and only shows on hover,
+                // the way a code block names itself without shouting.
+                div()
+                    .absolute()
+                    .top(px(4.))
+                    .right(px(4.))
+                    .invisible()
+                    .group_hover(super::view::group_name(ctx.id), |this| this.visible())
+                    .child(
+                        Button::new(("code-language", ctx.id.0 as usize))
+                            .ghost()
+                            .xsmall()
+                            .label(language)
+                            .dropdown_menu(move |menu, _window, _cx| {
+                                let mut menu = menu.label("Language");
+                                for language in CODE_LANGUAGES {
+                                    menu = menu.menu(
+                                        *language,
+                                        Box::new(super::actions::SetCodeLanguage(language)),
+                                    );
+                                }
+                                menu
+                            }),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -729,7 +766,19 @@ impl BlockSpec for Callout {
     }
 
     fn wrap(&self, ctx: &BlockContext, content: AnyElement, _: &mut Window, cx: &mut App) -> AnyElement {
-        let emoji = ctx.attrs.emoji.clone().unwrap_or_else(|| "💡".into());
+        // A document may carry its own emoji; without one the callout uses an
+        // icon, which renders on every platform whether or not a color emoji
+        // font is installed.
+        let marker = match ctx.attrs.emoji.clone() {
+            Some(emoji) => div().child(emoji).into_any_element(),
+            None => super::ui::icon(
+                "lightbulb",
+                px(18.),
+                cx.theme().muted_foreground,
+            )
+            .into_any_element(),
+        };
+
         h_flex()
             .w_full()
             .items_start()
@@ -737,7 +786,7 @@ impl BlockSpec for Callout {
             .p(px(16.))
             .rounded(px(6.))
             .bg(cx.theme().muted.opacity(0.6))
-            .child(div().flex_none().child(emoji))
+            .child(div().flex_none().pt(px(2.)).child(marker))
             .child(div().flex_1().child(content))
             .into_any_element()
     }
@@ -824,6 +873,14 @@ impl BlockSpec for Toggle {
         }]
     }
 }
+
+/// Languages offered by a code block's language menu. The set a build can
+/// actually highlight comes from the `tree-sitter-*` features it enables.
+pub const CODE_LANGUAGES: &[&str] = &[
+    "bash", "c", "cpp", "css", "diff", "go", "html", "java", "javascript", "json", "kotlin", "lua",
+    "markdown", "php", "plain text", "python", "ruby", "rust", "sql", "swift", "toml", "tsx",
+    "typescript", "yaml",
+];
 
 /// Line height helper shared by specs that size their own children.
 pub fn line_height(layout: &BlockLayout) -> gpui_kit::Pixels {

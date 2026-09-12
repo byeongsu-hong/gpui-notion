@@ -2,7 +2,7 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::{
-    App, Div, InteractiveElement as _, IntoElement, ParentElement as _, SharedString, Styled as _,
+    App, Div, InteractiveElement as _, IntoElement, SharedString, Styled as _,
     div, px,
 };
 

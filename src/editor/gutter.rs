@@ -7,16 +7,14 @@ use gpui_kit::component::{ActiveTheme, Sizable as _};
 
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, DragMoveEvent, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    ParentElement as _, Render, Styled as _, Window, div, px,
 };
 
-use gpui_kit::TestSupportExt as _;
 
 use super::block::BlockId;
-use super::style;
 use super::actions;
 use super::block::BlockRegistry;
-use super::ui::{self, Lucide};
+use super::ui::Lucide;
 use super::view::{Caret, NotionEditor, group_name};
 
 /// The payload carried while dragging a block.

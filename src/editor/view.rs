@@ -36,8 +36,6 @@ pub struct NotionEditor {
     focus_handle: FocusHandle,
     /// Block whose input currently holds focus.
     pub(crate) focused: Option<BlockId>,
-    /// Block under the pointer, which shows its gutter controls.
-    pub(crate) hovered: Option<BlockId>,
     /// Blocks selected as nodes, e.g. by a drag or Escape.
     pub(crate) selected: Vec<BlockId>,
     /// Width the text column last laid out at, for wrapping measurements.
@@ -61,7 +59,6 @@ impl NotionEditor {
             next_id: 1,
             focus_handle: cx.focus_handle(),
             focused: None,
-            hovered: None,
             selected: Vec::new(),
             wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
             suggestion: None,
@@ -867,6 +864,12 @@ impl Render for NotionEditor {
             .text_color(cx.theme().foreground);
 
         self.with_key_handlers(root, cx)
+            // A click anywhere in the page dismisses an open suggestion menu,
+            // the way clicking away from a popover closes it.
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|this, _, _window, cx| this.close_suggestion_menu(cx)),
+            )
             .child(
                 v_flex()
                     .id("page")

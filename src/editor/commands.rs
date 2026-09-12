@@ -659,6 +659,26 @@ impl NotionEditor {
         self.set_block_text(ix, text, caret, window, cx);
     }
 
+    /// Set the language a code block is highlighted with.
+    pub fn set_code_language(
+        &mut self,
+        language: impl Into<SharedString>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.active_index() else { return };
+        if self.blocks[ix].ty != types::CODE_BLOCK {
+            return;
+        }
+        self.record(Step::Structural, cx);
+        let language = language.into();
+        self.blocks[ix].attrs.language = Some(language.clone());
+        let state = self.blocks[ix].state.clone();
+        state.update(cx, |state, cx| state.set_highlighter(language, cx));
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
     /// Put the active block's text on the clipboard.
     pub fn copy_active_block(&mut self, cx: &mut Context<Self>) {
         let Some(ix) = self.active_index() else { return };

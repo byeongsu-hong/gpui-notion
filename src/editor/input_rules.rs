@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 use gpui_kit::{App, Context, Window};
 use regex::Regex;
 
-use super::block::{BlockAttrs, BlockId, BlockRegistry, types};
+use super::block::{BlockAttrs, BlockId, BlockRegistry};
 use super::mark::MarkKind;
 use super::view::{Caret, NotionEditor};
 
