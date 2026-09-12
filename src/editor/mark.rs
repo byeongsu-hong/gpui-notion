@@ -24,6 +24,8 @@ pub enum MarkKind {
     TextColor(TextColor),
     Superscript,
     Subscript,
+    /// A person referenced with `@`; the payload is their id.
+    Mention(SharedString),
 }
 
 impl MarkKind {
@@ -46,12 +48,13 @@ impl MarkKind {
             Self::TextColor(_) => "textStyle",
             Self::Superscript => "superscript",
             Self::Subscript => "subscript",
+            Self::Mention(_) => "mention",
         }
     }
 
     /// Marks that should not survive a newline / be carried into a new block.
     pub fn is_inclusive(&self) -> bool {
-        !matches!(self, Self::Link(_) | Self::Code)
+        !matches!(self, Self::Link(_) | Self::Code | Self::Mention(_))
     }
 }
 

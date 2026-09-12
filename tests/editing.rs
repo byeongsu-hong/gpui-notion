@@ -3,7 +3,7 @@
 
 use gpui_kit::component::Root;
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
-use gpui_kit::{AnyWindowHandle, AppContext as _, Context, Entity, TestAppContext, px, size};
+use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, px, size};
 use gpui_notion::editor::{self, NotionEditor, types};
 
 struct Harness {
@@ -271,10 +271,17 @@ fn the_slash_menu_filters_and_runs_an_item(cx: &mut TestAppContext) {
             .read(cx)
             .slash_items(cx)
             .into_iter()
-            .map(|item| item.title)
+            .map(|item| item.title().to_string())
             .collect::<Vec<_>>()
     });
-    assert_eq!(titles, vec!["Heading 1", "Heading 2", "Heading 3"]);
+    assert_eq!(
+        titles,
+        vec![
+            "Heading 1".to_string(),
+            "Heading 2".to_string(),
+            "Heading 3".to_string()
+        ]
+    );
 
     harness.press("down", cx);
     harness.press("enter", cx);
@@ -588,4 +595,86 @@ fn dragging_the_handle_reorders_blocks(cx: &mut TestAppContext) {
     // The pointer ends on the upper half of the third block, so the dragged
     // block lands above it.
     assert_eq!(harness.texts(cx), vec!["two", "one", "three"]);
+}
+
+#[gpui_kit::test]
+fn shift_enter_breaks_the_line_inside_a_block(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("shift-enter", cx);
+    harness.type_text("two", cx);
+
+    assert_eq!(harness.texts(cx), vec!["one\ntwo"]);
+}
+
+#[gpui_kit::test]
+fn arrows_move_within_a_wrapped_block_before_leaving_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("first", cx);
+    harness.press("enter", cx);
+    harness.type_text("one", cx);
+    harness.press("shift-enter", cx);
+    harness.type_text("two", cx);
+
+    // The caret is on the second row of the second block: up stays inside it.
+    harness.press("up", cx);
+    assert_eq!(harness.caret(cx).map(|(ix, _)| ix), Some(1));
+    harness.press("up", cx);
+    assert_eq!(harness.caret(cx).map(|(ix, _)| ix), Some(0));
+}
+
+#[gpui_kit::test]
+fn clicking_below_the_document_appends_a_paragraph(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("only", cx);
+
+    harness.ui(cx, |window, cx| window.click("trailing-space", cx));
+    assert_eq!(harness.texts(cx), vec!["only", ""]);
+    assert_eq!(harness.caret(cx).map(|(ix, _)| ix), Some(1));
+}
+
+#[gpui_kit::test]
+fn deleting_the_last_block_leaves_an_empty_paragraph(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("# gone", cx);
+    harness.press("secondary-shift-backspace", cx);
+
+    assert_eq!(harness.texts(cx), vec![""]);
+    assert_eq!(harness.types(cx), vec![types::PARAGRAPH]);
+}
+
+#[gpui_kit::test]
+fn the_emoji_menu_replaces_the_shortcode(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("ship it :rocket", cx);
+    assert!(cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+
+    harness.press("enter", cx);
+    assert_eq!(harness.texts(cx), vec!["ship it 🚀"]);
+    assert!(!cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+}
+
+#[gpui_kit::test]
+fn the_mention_menu_inserts_a_marked_name(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("ping @ada", cx);
+    assert!(cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+
+    harness.press("enter", cx);
+    assert_eq!(harness.texts(cx), vec!["ping @Ada Lovelace "]);
+    cx.update(|cx| {
+        let block = &harness.editor.read(cx).content()[0];
+        assert!(block.marks.has(
+            &gpui_notion::editor::MarkKind::Mention(Default::default()),
+            &(5..18)
+        ));
+    });
+}
+
+#[gpui_kit::test]
+fn a_colon_in_prose_does_not_hold_a_menu_open(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("note: something", cx);
+    assert!(!cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+    assert_eq!(harness.texts(cx), vec!["note: something"]);
 }

@@ -198,8 +198,8 @@ impl NotionEditor {
             cx.stop_propagation();
             return;
         }
-        if self.slash_menu_is_open() {
-            self.confirm_slash_item(window, cx);
+        if self.suggestion_is_open() {
+            self.confirm_suggestion(window, cx);
             cx.stop_propagation();
             return;
         }
@@ -272,8 +272,8 @@ impl NotionEditor {
         if self.link_editor_is_open() {
             return;
         }
-        if self.slash_menu_is_open() {
-            self.move_slash_selection(-1, cx);
+        if self.suggestion_is_open() {
+            self.move_suggestion_selection(-1, cx);
             cx.stop_propagation();
             return;
         }
@@ -291,8 +291,8 @@ impl NotionEditor {
         if self.link_editor_is_open() {
             return;
         }
-        if self.slash_menu_is_open() {
-            self.move_slash_selection(1, cx);
+        if self.suggestion_is_open() {
+            self.move_suggestion_selection(1, cx);
             cx.stop_propagation();
             return;
         }
@@ -340,8 +340,8 @@ impl NotionEditor {
         if self.link_editor_is_open() {
             return;
         }
-        if self.slash_menu_is_open() {
-            self.move_slash_selection(1, cx);
+        if self.suggestion_is_open() {
+            self.move_suggestion_selection(1, cx);
             cx.stop_propagation();
             return;
         }
@@ -359,8 +359,8 @@ impl NotionEditor {
         if self.link_editor_is_open() {
             return;
         }
-        if self.slash_menu_is_open() {
-            self.move_slash_selection(-1, cx);
+        if self.suggestion_is_open() {
+            self.move_suggestion_selection(-1, cx);
             cx.stop_propagation();
             return;
         }
@@ -379,8 +379,8 @@ impl NotionEditor {
             cx.stop_propagation();
             return;
         }
-        if self.slash_menu_is_open() {
-            self.close_slash_menu(cx);
+        if self.suggestion_is_open() {
+            self.close_suggestion_menu(cx);
             cx.stop_propagation();
             return;
         }

@@ -30,7 +30,7 @@ pub struct LinkEditor {
 impl super::view::NotionEditor {
     /// Whether the selection toolbar should be on screen.
     pub fn selection_toolbar_visible(&self, cx: &App) -> bool {
-        if self.slash_menu_is_open() || self.drop_target.is_some() {
+        if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
         let Some((id, range)) = self.selection(cx) else {

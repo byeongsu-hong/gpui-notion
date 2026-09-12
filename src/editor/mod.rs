@@ -19,6 +19,7 @@ pub mod mark;
 pub mod selection;
 pub mod slash;
 pub mod style;
+pub mod suggestion;
 pub mod toolbar;
 pub mod ui;
 pub mod view;

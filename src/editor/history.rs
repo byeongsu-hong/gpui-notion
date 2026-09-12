@@ -107,7 +107,7 @@ impl NotionEditor {
     fn restore(&mut self, snapshot: Snapshot, window: &mut Window, cx: &mut Context<Self>) {
         self.history.replaying = true;
         self.history.last_step = None;
-        self.slash = None;
+        self.suggestion = None;
         self.link_editor = None;
         self.selected.clear();
         self.focused = None;

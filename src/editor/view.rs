@@ -42,8 +42,10 @@ pub struct NotionEditor {
     pub(crate) selected: Vec<BlockId>,
     /// Width the text column last laid out at, for wrapping measurements.
     pub(crate) wrap_width: Pixels,
-    /// The open slash menu, if any.
-    pub(crate) slash: Option<super::slash::SlashMenu>,
+    /// The open suggestion menu, if any.
+    pub(crate) suggestion: Option<super::slash::SuggestionMenu>,
+    /// People offered by the `@` menu.
+    pub(crate) mentions: Vec<super::suggestion::Mention>,
     /// Where a dragged block would land.
     pub(crate) drop_target: Option<super::gutter::DropTarget>,
     /// The open link editor, if any.
@@ -62,7 +64,8 @@ impl NotionEditor {
             hovered: None,
             selected: Vec::new(),
             wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
-            slash: None,
+            suggestion: None,
+            mentions: super::suggestion::default_mentions(),
             drop_target: None,
             link_editor: None,
             history: super::history::History::default(),
@@ -383,7 +386,15 @@ impl NotionEditor {
         self.record(super::history::Step::Typing, cx);
         let old_text = std::mem::replace(&mut self.blocks[ix].text, new_text.clone());
 
-        if let Some(edit) = diff_edit(&old_text, &new_text) {
+        let edit = diff_edit(&old_text, &new_text);
+        // A lone newline is Shift-Enter's soft break; anything longer that
+        // carries newlines arrived as a paste.
+        let pasted = edit.as_ref().is_some_and(|edit| {
+            edit.new_len > 1
+                && new_text[edit.range.start..edit.range.start + edit.new_len].contains('\n')
+        });
+
+        if let Some(edit) = edit {
             // What the new text is formatted as: the marks armed at the caret
             // if any, otherwise the marks that were live where it was typed.
             let at = edit.range.start..edit.range.start;
@@ -409,11 +420,11 @@ impl NotionEditor {
         }
 
         self.apply_decorations(id, cx);
-        if self.split_pasted_lines(id, window, cx) {
+        if pasted && self.split_pasted_lines(id, window, cx) {
             return;
         }
         self.run_input_rules(id, window, cx);
-        self.sync_slash_menu(window, cx);
+        self.sync_suggestion_menu(window, cx);
         cx.emit(DocumentChanged);
         cx.notify();
     }
@@ -816,6 +827,10 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
                 style.background_color = Some(style::highlight_fill(*color, cx))
             }
             MarkKind::TextColor(color) => style.color = style::text_color_value(*color, cx),
+            MarkKind::Mention(_) => {
+                style.color = Some(cx.theme().primary);
+                style.background_color = Some(cx.theme().accent);
+            }
             MarkKind::Superscript | MarkKind::Subscript => {}
         }
     }
@@ -869,6 +884,7 @@ impl Render for NotionEditor {
                                 // the caret in a trailing paragraph.
                                 div()
                                     .id("trailing-space")
+                                    .test_support()
                                     .w_full()
                                     .h(style::PAGE_BOTTOM)
                                     .cursor_text()
@@ -878,7 +894,7 @@ impl Render for NotionEditor {
                             ),
                     ),
             )
-            .children(self.render_slash_menu(window, cx))
+            .children(self.render_suggestion_menu(window, cx))
             .children(self.render_selection_toolbar(window, cx))
             .children(self.render_link_editor(window, cx))
     }
