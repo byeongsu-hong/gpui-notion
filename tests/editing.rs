@@ -900,3 +900,87 @@ fn turning_selected_blocks_into_a_list_changes_all_of_them(cx: &mut TestAppConte
         vec![types::BULLET_LIST, types::BULLET_LIST]
     );
 }
+
+#[gpui_kit::test]
+fn commenting_a_selection_opens_a_thread(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("needs review", cx);
+    harness.ui(cx, |window, cx| {
+        window.press("secondary-a", cx);
+        window.press("secondary-shift-m", cx);
+    });
+
+    let (threads, quote) = cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        (
+            editor.comment_threads().len(),
+            editor
+                .comment_threads()
+                .first()
+                .map(|thread| thread.quote().to_string()),
+        )
+    });
+    assert_eq!(threads, 1);
+    assert_eq!(quote.as_deref(), Some("needs review"));
+
+    // The commented range carries the mark that anchors the thread.
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let id = editor.comment_threads()[0].id();
+        let block = &editor.content()[0];
+        assert!(block.marks.has(&MarkKind::Comment(id), &(0..block.text.len())));
+    });
+
+    // Typing into the draft and pressing Enter posts the comment.
+    harness.ui(cx, |window, cx| {
+        window.input("looks good", cx);
+        window.press("enter", cx);
+    });
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let thread = &editor.comment_threads()[0];
+        assert_eq!(thread.comments().len(), 1);
+        assert_eq!(thread.comments()[0].body(), "looks good");
+        assert_eq!(thread.comments()[0].author(), "You");
+    });
+}
+
+#[gpui_kit::test]
+fn an_abandoned_comment_leaves_no_thread_behind(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("draft text", cx);
+    harness.ui(cx, |window, cx| {
+        window.press("secondary-a", cx);
+        window.press("secondary-shift-m", cx);
+        window.press("escape", cx);
+    });
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(editor.comment_threads().is_empty());
+        assert!(editor.content()[0].marks.is_empty());
+    });
+}
+
+#[gpui_kit::test]
+fn resolving_a_thread_takes_the_highlight_off(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("ship it", cx);
+    harness.ui(cx, |window, cx| {
+        window.press("secondary-a", cx);
+        window.press("secondary-shift-m", cx);
+        window.input("done", cx);
+        window.press("enter", cx);
+    });
+
+    let id = cx.update(|cx| harness.editor.read(cx).comment_threads()[0].id());
+    harness.ui(cx, |window, cx| window.click("resolve-thread", cx));
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let thread = editor.comment_thread(id).expect("thread is kept");
+        assert!(thread.is_resolved());
+        assert!(editor.content()[0].marks.is_empty());
+        assert!(editor.open_thread().is_none());
+    });
+}

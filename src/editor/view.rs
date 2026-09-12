@@ -44,6 +44,11 @@ pub struct NotionEditor {
     pub(crate) block_bounds: HashMap<BlockId, Bounds<Pixels>>,
     /// The block a press started in, which anchors a drag selection.
     pub(crate) mouse_anchor: Option<BlockId>,
+    /// Comment threads, and which one is on screen.
+    pub(crate) comments: Vec<super::comments::Thread>,
+    pub(crate) next_thread_id: u64,
+    pub(crate) open_thread: Option<super::comments::ThreadId>,
+    pub(crate) comment_draft: Option<super::comments::CommentDraft>,
     /// Blocks selected as nodes, e.g. by a drag or Escape.
     pub(crate) selected: Vec<BlockId>,
     /// Width the text column last laid out at, for wrapping measurements.
@@ -70,6 +75,10 @@ impl NotionEditor {
             always_show_gutter: false,
             block_bounds: HashMap::new(),
             mouse_anchor: None,
+            comments: Vec::new(),
+            next_thread_id: 1,
+            open_thread: None,
+            comment_draft: None,
             selected: Vec::new(),
             wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
             suggestion: None,
@@ -899,6 +908,14 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
                 style.color = Some(cx.theme().primary);
                 style.background_color = Some(cx.theme().accent);
             }
+            MarkKind::Comment(_) => {
+                style.background_color = Some(style::comment_fill(cx));
+                style.underline = Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: Some(style::comment_accent(cx)),
+                    wavy: false,
+                });
+            }
             MarkKind::Superscript | MarkKind::Subscript => {}
         }
     }
@@ -942,7 +959,10 @@ impl Render for NotionEditor {
             // the way clicking away from a popover closes it.
             .on_mouse_down(
                 gpui_kit::MouseButton::Left,
-                cx.listener(|this, _, _window, cx| this.close_suggestion_menu(cx)),
+                cx.listener(|this, event: &gpui_kit::MouseDownEvent, window, cx| {
+                    this.close_suggestion_menu(cx);
+                    this.open_thread_for_press(event, window, cx);
+                }),
             )
             .capture_any_mouse_down(cx.listener(Self::on_page_mouse_down))
             .on_mouse_move(cx.listener(Self::on_page_mouse_move))
@@ -977,6 +997,7 @@ impl Render for NotionEditor {
             .children(self.render_suggestion_menu(window, cx))
             .children(self.render_selection_toolbar(window, cx))
             .children(self.render_link_editor(window, cx))
+            .children(self.render_comment_popover(window, cx))
     }
 }
 

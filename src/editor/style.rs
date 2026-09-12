@@ -73,6 +73,26 @@ pub fn link_color(cx: &App) -> Hsla {
 }
 
 /// Fill of a `highlight` mark.
+/// The wash behind commented text: Notion's amber, dimmed in the dark theme.
+pub fn comment_fill(cx: &App) -> Hsla {
+    let rgb = if cx.theme().mode.is_dark() {
+        0x4a3a12
+    } else {
+        0xfdf0d5
+    };
+    gpui_kit::rgb(rgb).into()
+}
+
+/// The line under commented text and beside a quoted thread.
+pub fn comment_accent(cx: &App) -> Hsla {
+    let rgb = if cx.theme().mode.is_dark() {
+        0xd9a441
+    } else {
+        0xd9880f
+    };
+    gpui_kit::rgb(rgb).into()
+}
+
 pub fn highlight_fill(color: Option<super::mark::HighlightColor>, cx: &App) -> Hsla {
     use super::mark::HighlightColor::*;
     let dark = cx.theme().mode.is_dark();

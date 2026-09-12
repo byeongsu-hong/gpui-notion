@@ -26,6 +26,8 @@ pub enum MarkKind {
     Subscript,
     /// A person referenced with `@`; the payload is their id.
     Mention(SharedString),
+    /// Text a comment thread hangs off; the payload names the thread.
+    Comment(super::comments::ThreadId),
 }
 
 impl MarkKind {
@@ -49,12 +51,16 @@ impl MarkKind {
             Self::Superscript => "superscript",
             Self::Subscript => "subscript",
             Self::Mention(_) => "mention",
+            Self::Comment(_) => "comment",
         }
     }
 
     /// Marks that should not survive a newline / be carried into a new block.
     pub fn is_inclusive(&self) -> bool {
-        !matches!(self, Self::Link(_) | Self::Code | Self::Mention(_))
+        !matches!(
+            self,
+            Self::Link(_) | Self::Code | Self::Mention(_) | Self::Comment(_)
+        )
     }
 }
 

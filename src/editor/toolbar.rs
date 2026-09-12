@@ -80,6 +80,14 @@ impl super::view::NotionEditor {
             ))
             .child(self.mark_button("code", "Code", MarkKind::Code, cx))
             .child(separator(cx))
+            .child(
+                Button::new("comment")
+                    .ghost()
+                    .small()
+                    .icon(ui::Lucide("message-square-plus"))
+                    .tooltip("Comment")
+                    .on_click(cx.listener(|this, _, window, cx| this.add_comment(window, cx))),
+            )
             .child(self.render_link_button(cx))
             .child(self.render_color_menu(&focus, cx))
             .when_not(code_active, |this| {

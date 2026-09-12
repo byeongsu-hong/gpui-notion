@@ -11,6 +11,7 @@ pub mod actions;
 pub mod block;
 pub mod blocks;
 pub mod commands;
+pub mod comments;
 pub mod gutter;
 pub mod history;
 pub mod input_rules;
@@ -27,6 +28,7 @@ pub mod view;
 pub use block::{
     Block, BlockAttrs, BlockContent, BlockId, BlockRegistry, BlockSpec, BlockType, types,
 };
+pub use comments::{Comment, Thread, ThreadId};
 pub use mark::{HighlightColor, Mark, MarkKind, MarkList, TextColor};
 pub use view::NotionEditor;
 

@@ -224,6 +224,7 @@ fn block_menu(
     let color_focus = focus.clone();
     menu.action_context(focus)
         .label(label)
+        .menu("Comment", Box::new(actions::AddComment))
         .submenu("Color", window, cx, {
             let focus = color_focus.clone();
             move |menu, _, _| color_menu(focus.clone(), menu)

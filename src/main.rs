@@ -63,6 +63,10 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
         Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
         Ok("focus") => editor.select_text_in_block(3, 5..5, window, cx),
         Ok("gutter") => editor.show_gutter_always(),
+        Ok("comment") => {
+            editor.select_text_in_block(3, 0..12, window, cx);
+            editor.add_comment(window, cx);
+        }
         Ok("slash") => {
             editor.focus_last_block(window, cx);
             editor.open_slash_menu(window, cx);

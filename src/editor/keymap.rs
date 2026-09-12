@@ -181,6 +181,9 @@ impl NotionEditor {
             .on_action(cx.listener(|this, _: &actions::CopyBlock, _window, cx| {
                 this.copy_active_block(cx)
             }))
+            .on_action(cx.listener(|this, _: &actions::AddComment, window, cx| {
+                this.add_comment(window, cx)
+            }))
             .on_action(cx.listener(|this, _: &actions::OpenEmojiMenu, window, cx| {
                 this.open_suggestion(super::suggestion::Trigger::Emoji, window, cx)
             }))
@@ -208,6 +211,10 @@ impl NotionEditor {
     // ------------------------------------------------------------- handlers
 
     fn on_enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.comment_draft_is_open() {
+            // The comment box owns Enter; it posts what was typed.
+            return;
+        }
         if self.link_editor_is_open() {
             self.apply_link_editor(window, cx);
             cx.stop_propagation();
@@ -246,7 +253,7 @@ impl NotionEditor {
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.has_block_selection() {
@@ -265,7 +272,7 @@ impl NotionEditor {
 
     fn on_delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.has_block_selection() {
@@ -284,7 +291,7 @@ impl NotionEditor {
 
     fn on_move_up(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.suggestion_is_open() {
@@ -303,7 +310,7 @@ impl NotionEditor {
 
     fn on_move_down(&mut self, _: &MoveDown, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.suggestion_is_open() {
@@ -330,7 +337,7 @@ impl NotionEditor {
 
     fn on_move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         let Some(ix) = self.active_index() else { return };
@@ -345,7 +352,7 @@ impl NotionEditor {
 
     fn on_move_right(&mut self, _: &MoveRight, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         let Some(ix) = self.active_index() else { return };
@@ -360,7 +367,7 @@ impl NotionEditor {
 
     fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.suggestion_is_open() {
@@ -379,7 +386,7 @@ impl NotionEditor {
 
     fn on_shift_tab(&mut self, _: &OutdentInline, window: &mut Window, cx: &mut Context<Self>) {
         // While a popover owns the keyboard, the document keeps its hands off.
-        if self.link_editor_is_open() {
+        if self.link_editor_is_open() || self.comment_draft_is_open() {
             return;
         }
         if self.suggestion_is_open() {
@@ -404,7 +411,7 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.has_block_selection() {
+        if !self.has_block_selection() || self.comment_draft_is_open() {
             return;
         }
         let modifiers = event.keystroke.modifiers;
@@ -435,6 +442,11 @@ impl NotionEditor {
     }
 
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.comment_draft_is_open() {
+            self.close_comment_popover(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.link_editor_is_open() {
             self.close_link_editor(window, cx);
             cx.stop_propagation();
