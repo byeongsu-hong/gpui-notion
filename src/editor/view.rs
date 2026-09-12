@@ -257,9 +257,18 @@ impl NotionEditor {
             .unwrap_or_else(|| layout.line_height_px())
     }
 
-    /// Where a block's text actually starts on screen.
+    /// Where a block's first glyph actually sits on screen.
+    ///
+    /// This is not the origin of the input's text area: the input insets the
+    /// glyphs from it, so anything that has to line up with the text — the
+    /// selection toolbar, a comment popover — asks the input where the text
+    /// is rather than working it out from the block's box.
     pub fn block_text_origin(&self, id: BlockId, cx: &App) -> Option<gpui_kit::Point<Pixels>> {
-        Some(self.block(id)?.state.read(cx).text_bounds()?.origin)
+        let state = self.block(id)?.state.read(cx);
+        state
+            .range_to_bounds(&(0..0))
+            .map(|bounds| bounds.origin)
+            .or_else(|| state.text_bounds().map(|bounds| bounds.origin))
     }
 
     /// Whether a block's text area is at least as tall as the text in it.

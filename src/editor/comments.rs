@@ -485,7 +485,10 @@ impl NotionEditor {
             }
         }
         let bounds = self.block_bounds(thread.block)?;
-        Some(bounds.origin + Point::new(px(0.), bounds.size.height))
+        let origin = self
+            .block_text_origin(thread.block, cx)
+            .unwrap_or(bounds.origin);
+        Some(Point::new(origin.x, bounds.origin.y + bounds.size.height))
     }
 }
 

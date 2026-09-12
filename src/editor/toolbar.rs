@@ -118,15 +118,23 @@ impl super::view::NotionEditor {
         )
     }
 
+    /// Where the toolbar hangs, for tests that check it lines up with what it
+    /// acts on.
+    pub fn toolbar_anchor_for_test(&self, cx: &App) -> Option<Point<Pixels>> {
+        self.toolbar_anchor(cx)
+    }
+
     /// Where the toolbar hangs: over the selected text, or over the first
     /// block when whole blocks are selected.
     fn toolbar_anchor(&self, cx: &App) -> Option<Point<Pixels>> {
         if self.has_block_selection() {
+            // Ask the block where its text is; the block's own box is inset
+            // from the glyphs by whatever the input keeps for itself.
             let id = self.selected_blocks().first().copied()?;
-            let bounds = self.block_bounds(id)?;
-            // A block reports the bounds of its content, so its origin is
-            // already where the text starts.
-            return Some(bounds.origin + Point::new(px(0.), px(-8.)));
+            let origin = self
+                .block_text_origin(id, cx)
+                .or_else(|| self.block_bounds(id).map(|bounds| bounds.origin))?;
+            return Some(origin + Point::new(px(0.), px(-8.)));
         }
         let (id, range) = self.selection(cx)?;
         let ix = self.index_of(id)?;

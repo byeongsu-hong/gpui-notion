@@ -1582,3 +1582,73 @@ fn a_drag_that_starts_at_the_left_of_the_text_still_selects_blocks(cx: &mut Test
         2
     );
 }
+
+#[gpui_kit::test]
+fn the_gutter_controls_appear_only_on_the_hovered_block(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", 1usize), cx);
+        window.render_frame(cx);
+
+        assert!(
+            window.find(("drag", 1usize)).visible(),
+            "the hovered block has no handle"
+        );
+        assert!(
+            !window.find(("drag", 2usize)).visible(),
+            "a block nobody is pointing at shows its handle"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn the_toolbar_sits_over_the_selected_text(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("a line to select", cx);
+    harness.press("secondary-a", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let id = editor.block_id_at(1).unwrap();
+        let text = editor.block_text_origin(id, cx).expect("laid out");
+        let anchor = editor.toolbar_anchor_for_test(cx).expect("a toolbar");
+        // Both are glyph coordinates, so they line up to the pixel.
+        assert!(
+            (anchor.x - text.x).abs() < px(2.),
+            "the toolbar hangs at {anchor:?}, the text starts at {text:?}"
+        );
+        assert!(
+            anchor.y < text.y,
+            "the toolbar is not above the text it belongs to"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn the_toolbar_over_a_block_selection_lines_up_with_its_text(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("shift-up", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(editor.has_block_selection());
+        let id = editor.selected_blocks()[0];
+        let text = editor.block_text_origin(id, cx).expect("laid out");
+        let anchor = editor.toolbar_anchor_for_test(cx).expect("a toolbar");
+        assert!(
+            (anchor.x - text.x).abs() < px(2.),
+            "the toolbar hangs at {anchor:?}, the block's text starts at {text:?}"
+        );
+    });
+}
