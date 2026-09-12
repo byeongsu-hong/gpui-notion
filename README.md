@@ -13,7 +13,7 @@ cargo test           # unit tests + UI integration tests
 
 - **Blocks**: paragraph, heading 1–3, bullet / numbered / to-do lists (nested), blockquote,
   code block with syntax highlighting and a language menu, separator, image (click or drop
-  a file), callout, toggle.
+  a file), callout, toggle, table.
 - **Inline marks**: bold, italic, underline, strike, code, link, highlight (10 colors),
   text color (10 colors), mention.
 - **Markdown input rules**: `# `, `## `, `### `, `- `, `* `, `+ `, `1. `, `[] `, `[x] `,
@@ -24,8 +24,12 @@ cargo test           # unit tests + UI integration tests
 - **Selection toolbar**: turn-into, B/I/U/S/code, link editor, color palettes, more menu.
 - **Gutter**: hover `+` to insert a block, grip to select, drag to reorder, click for the
   block menu (turn into, reset formatting, duplicate, copy, move, delete).
-- **Document undo/redo** with typing coalescing, block-level selection, clipboard as
-  markdown, paste that becomes blocks.
+- **Comments**: select text and comment on it — an amber anchor in the document, a thread
+  popover with replies and Resolve, and clicking commented text opens its thread.
+- **Block selection**: drag across blocks or Shift+Click to select whole ones, then type
+  over them, format them, indent them or turn them all into something else.
+- **Document undo/redo** with typing coalescing, clipboard as markdown (tables included),
+  paste that becomes blocks.
 
 Parity is graded item by item against the template in [`docs/PARITY.md`](docs/PARITY.md).
 The spec it is graded against is [`docs/research/tiptap-notion-spec.md`](docs/research/tiptap-notion-spec.md),
@@ -42,6 +46,8 @@ NotionEditor (Entity)            src/editor/view.rs
 │   ├── text: String             mirror of the input, used to diff edits
 │   ├── marks: MarkList          inline formatting as byte ranges
 │   └── state: Entity<EditorState>  one gpui-kit code-editor input per block
+├── grids: BlockId -> CellGrid   child text areas for grid blocks (tables)
+├── comments: Vec<Thread>        discussions anchored by a mark
 ├── suggestion / link_editor / selection / history / drop_target
 └── BlockRegistry (Global)       node types, their rendering and their rules
 ```
@@ -102,8 +108,10 @@ BlockRegistry::register(cx, Warning);
 ```
 
 A spec can also supply `render_leading` (the bullet, number or checkbox column),
-`render_body` (for nodes that are not text, like the separator), `caps` (whether marks,
-input rules, list nesting or multi-line Enter apply) and `split_into` (what Enter creates).
+`render_body` (for nodes that are not text, like the separator or the table), `caps`
+(whether marks, input rules, list nesting, multi-line Enter or a grid of child cells apply)
+and `split_into` (what Enter creates). Asking for `BlockCaps::grid()` gets the block a
+`CellGrid` of child text areas, which is all a table is.
 
 ## Keyboard
 
@@ -123,6 +131,9 @@ input rules, list nesting or multi-line Enter apply) and `split_into` (what Ente
 | `Mod+D` / `Mod+Shift+Backspace` | duplicate / delete block |
 | `Mod+Shift+↑` `Mod+Shift+↓` | move the block |
 | `Mod+Z` / `Mod+Shift+Z` / `Mod+Y` | undo / redo |
+| `Mod+Shift+M` | comment on the selection |
+| `Mod+Shift+E` / `Mod+Shift+2` / `Mod+Shift+I` | emoji menu / mention menu / image |
+| `Tab` / `Shift+Tab` in a table | next / previous cell; Tab in the last cell adds a row |
 | `Mod+/` | open the block menu · `Escape` closes menus, then selects the block |
 
 ## Testing
@@ -134,6 +145,7 @@ live beside it in `src/editor/mark.rs`.
 ```bash
 cargo test --test editing        # UI integration tests
 NOTION_DEMO=toolbar cargo run    # open the window with the selection toolbar shown
+NOTION_DEMO=comment cargo run    # … with a comment thread open (also: slash, table, gutter)
 ```
 
 ## Notes and limits
@@ -141,6 +153,6 @@ NOTION_DEMO=toolbar cargo run    # open the window with the selection toolbar sh
 Some template behaviour cannot be expressed on this stack today, and is recorded as such in
 `docs/PARITY.md`: GPUI's `HighlightStyle` carries no font size or family, so per-range font
 switching (real superscript baselines, monospace inline code) is unavailable, and
-multi-line inputs do not support per-block text alignment. Tables are not implemented, and
-image blocks take a picked or dropped file but have no upload progress, size limits or
-captions.
+multi-line inputs do not support per-block text alignment. Table cells hold plain text (no
+marks, no column resizing or merging), and image blocks take a picked or dropped file but
+have no upload progress, size limits or captions.
