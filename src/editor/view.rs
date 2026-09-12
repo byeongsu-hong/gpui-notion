@@ -238,6 +238,22 @@ impl NotionEditor {
         Some(self.block(id)?.state.read(cx).scroll_offset())
     }
 
+    /// The line height a block's input laid out with, which is the one the
+    /// markers and gutter controls have to line up against.
+    fn line_height_at(&self, ix: usize, cx: &App) -> Pixels {
+        let layout = self.layout_at(ix, cx);
+        self.blocks[ix]
+            .state
+            .read(cx)
+            .line_height()
+            .unwrap_or_else(|| layout.line_height_px())
+    }
+
+    /// Where a block's text actually starts on screen.
+    pub fn block_text_origin(&self, id: BlockId, cx: &App) -> Option<gpui_kit::Point<Pixels>> {
+        Some(self.block(id)?.state.read(cx).text_bounds()?.origin)
+    }
+
     /// Whether a block's text area is at least as tall as the text in it.
     ///
     /// This is the invariant that keeps a document still: a text area shorter
@@ -679,10 +695,21 @@ impl NotionEditor {
 
     fn measure_rows(&self, ix: usize, layout: &BlockLayout, cx: &App) -> usize {
         let block = &self.blocks[ix];
-        let wrap_width = self.wrap_width
-            - style::INDENT_WIDTH * block.indent as f32
-            - layout.leading_width
-            - layout.inner_padding * 2.;
+        // The width text wraps at is the one the input ended up with; the
+        // arithmetic below is only the guess for a block that has not laid
+        // out yet.
+        let wrap_width = block
+            .state
+            .read(cx)
+            .text_bounds()
+            .map(|bounds| bounds.size.width)
+            .filter(|width| *width > px(1.))
+            .unwrap_or_else(|| {
+                self.wrap_width
+                    - style::INDENT_WIDTH * block.indent as f32
+                    - layout.leading_width
+                    - layout.inner_padding * 2.
+            });
         if wrap_width <= px(1.) {
             return 1;
         }
@@ -768,6 +795,8 @@ impl NotionEditor {
             ix,
             grid: self.grids.get(&block.id),
             reveal_controls: self.always_show_gutter,
+            line_height: self.line_height_at(ix, cx),
+            leading_width: self.layout_at(ix, cx).leading_width,
             attrs: &block.attrs,
             text: &block.text,
             indent: block.indent,
@@ -893,6 +922,25 @@ impl NotionEditor {
     /// Where a block sits on screen as of the last frame.
     pub fn block_bounds(&self, id: BlockId) -> Option<Bounds<Pixels>> {
         self.block_bounds.get(&id).copied()
+    }
+
+    /// An invisible element that reports how wide the content column came out,
+    /// which is the width text wraps at before a block has laid out once.
+    fn column_probe(&self, cx: &mut Context<Self>) -> AnyElement {
+        let editor = cx.entity().downgrade();
+        canvas(
+            move |bounds, _window, cx| {
+                let _ = editor.update(cx, |this, _| {
+                    if (this.wrap_width - bounds.size.width).abs() > px(0.5) {
+                        this.wrap_width = bounds.size.width;
+                    }
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .w_full()
+        .h(px(0.))
+        .into_any_element()
     }
 
     /// An invisible element that reports where the block landed, which is how
@@ -1057,9 +1105,13 @@ impl Render for NotionEditor {
                     .items_center()
                     .child(
                         v_flex()
-                            .w(style::PAGE_WIDTH)
+                            // `minmax(auto, 708px)`: the column gives way on a
+                            // narrow window instead of running off it.
+                            .w_full()
+                            .max_w(style::PAGE_WIDTH)
                             .px(style::PAGE_PADDING)
                             .pt(style::PAGE_PADDING)
+                            .child(self.column_probe(cx))
                             .children(blocks)
                             .child(
                                 // Clicking the space under the document puts

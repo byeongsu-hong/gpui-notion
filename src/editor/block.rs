@@ -233,6 +233,10 @@ pub struct BlockContext<'a> {
     pub grid: Option<&'a super::grid::CellGrid>,
     /// Review aid: draw hover-only controls as if the pointer were here.
     pub reveal_controls: bool,
+    /// Line height the block's input laid out with.
+    pub line_height: Pixels,
+    /// Width of the marker column this block's layout asks for.
+    pub leading_width: Pixels,
     pub editor: WeakEntity<NotionEditor>,
 }
 
@@ -513,11 +517,15 @@ impl BlockContent {
 }
 
 /// Convenience for specs: an element sized to one line of the block's text.
-pub fn leading_slot(layout: &BlockLayout, child: impl IntoElement) -> AnyElement {
+/// The column a bullet, number or checkbox sits in, one line tall, so the
+/// marker centres on the first line of the block's text. The line height is
+/// the one the input laid out with, not the one the layout asked for: they
+/// differ by the rounding the text system applies.
+pub fn leading_slot(ctx: &BlockContext, child: impl IntoElement) -> AnyElement {
     use gpui_kit::{ParentElement as _, Styled as _, div};
     div()
-        .w(layout.leading_width)
-        .h(layout.line_height_px())
+        .w(ctx.leading_width)
+        .h(ctx.line_height)
         .flex()
         .items_center()
         .flex_none()

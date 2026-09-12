@@ -206,7 +206,7 @@ impl BlockSpec for BulletList {
             _ => "▪",
         };
         Some(leading_slot(
-            &list_layout(),
+            ctx,
             div()
                 .w_full()
                 .text_size(px(16.))
@@ -270,7 +270,7 @@ impl BlockSpec for OrderedList {
             _ => format!("{}.", roman_ordinal(n)),
         };
         Some(leading_slot(
-            &list_layout(),
+            ctx,
             div()
                 .w_full()
                 .text_size(px(15.))
@@ -389,7 +389,7 @@ impl BlockSpec for TaskList {
         };
 
         Some(leading_slot(
-            &list_layout(),
+            ctx,
             div()
                 .id(("check", id.0 as usize))
                 .size(px(16.))
@@ -881,10 +881,7 @@ impl BlockSpec for Toggle {
         let collapsed = ctx.attrs.collapsed;
         let editor = ctx.editor.clone();
         Some(leading_slot(
-            &BlockLayout {
-                leading_width: px(24.),
-                ..Default::default()
-            },
+            ctx,
             div()
                 .id(("toggle", id.0 as usize))
                 .size(px(20.))

@@ -1511,3 +1511,69 @@ fn a_table_cell_has_nothing_to_scroll(cx: &mut TestAppContext) {
         }
     });
 }
+
+#[gpui_kit::test]
+fn a_narrow_window_reflows_instead_of_clipping(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(editor::init);
+
+    let content = vec![gpui_notion::editor::block::BlockContent::paragraph(
+        "A paragraph that is comfortably one row wide in a roomy window and has to \
+         take several rows in a narrow one, which is the case that used to leave \
+         blocks sized for a width they never got.",
+    )];
+    let mut view = None;
+    // Narrower than the 708px content column.
+    let handle = cx.open_window(size(px(420.), px(600.)), |window, cx| {
+        let editor = cx.new(|cx| NotionEditor::with_content(content.clone(), window, cx));
+        view = Some(editor.clone());
+        Root::new(editor, window, cx)
+    });
+    let view = view.unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        let editor = view.read(cx);
+        let id = editor.block_id_at(0).unwrap();
+        assert!(
+            editor.text_area_fits_text(id, cx),
+            "the block is shorter than its text in a narrow window"
+        );
+        assert_eq!(
+            editor.block_scroll_offset(id, cx).map(|p| f32::from(p.y)),
+            Some(0.),
+            "the block scrolled inside itself in a narrow window"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_drag_that_starts_at_the_left_of_the_text_still_selects_blocks(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    // Press on the first glyph of a block, not in the middle of the row.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        let from = window.find(("block", 1usize)).bounds();
+        let to = window.find(("block", 2usize)).bounds();
+        window.drag(
+            gpui_kit::point(from.left() + px(2.), from.center().y),
+            to.center(),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update(|cx| harness.editor.read(cx).selected_blocks().len()),
+        2
+    );
+}

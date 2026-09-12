@@ -13,7 +13,6 @@ use gpui_kit::{
 
 use super::block::{BlockContent, BlockId, BlockRegistry, types};
 use super::history::Step;
-use super::style;
 use super::view::{Caret, NotionEditor};
 
 impl NotionEditor {
@@ -206,10 +205,13 @@ impl NotionEditor {
 
     /// Whether a press at this position was aimed at the block's text rather
     /// than at the gutter controls, which run their own drag.
+    ///
+    /// A block's reported bounds start at its content, past the gutter it
+    /// reaches into, so the content edge is the whole test.
     fn press_is_on_text(&self, id: BlockId, position: Point<Pixels>) -> bool {
         self.block_bounds
             .get(&id)
-            .is_some_and(|bounds| position.x >= bounds.left() + style::GUTTER_CONTROLS_WIDTH)
+            .is_some_and(|bounds| position.x >= bounds.left())
     }
 
     // ------------------------------------------------------------- handlers

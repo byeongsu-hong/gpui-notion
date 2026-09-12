@@ -72,8 +72,14 @@ impl NotionEditor {
             .label(&block.attrs);
         let focus = self.focus_handle_for_editor();
         let is_table = BlockRegistry::global(cx).get(&block.ty).caps().grid;
-        // Centre the controls on the block's first line.
-        let top = (layout.line_height_px() - px(24.)).max(px(0.)) / 2.;
+        // Centre the controls on the block's first line, using the line
+        // height the input laid out with rather than the asked-for one.
+        let line_height = block
+            .state
+            .read(cx)
+            .line_height()
+            .unwrap_or_else(|| layout.line_height_px());
+        let top = (line_height - px(24.)).max(px(0.)) / 2.;
 
         let mut controls = div()
             .absolute()
