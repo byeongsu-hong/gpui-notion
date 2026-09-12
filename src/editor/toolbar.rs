@@ -124,7 +124,9 @@ impl super::view::NotionEditor {
         if self.has_block_selection() {
             let id = self.selected_blocks().first().copied()?;
             let bounds = self.block_bounds(id)?;
-            return Some(bounds.origin + Point::new(super::style::GUTTER_CONTROLS_WIDTH, px(-8.)));
+            // A block reports the bounds of its content, so its origin is
+            // already where the text starts.
+            return Some(bounds.origin + Point::new(px(0.), px(-8.)));
         }
         let (id, range) = self.selection(cx)?;
         let ix = self.index_of(id)?;

@@ -485,7 +485,7 @@ impl NotionEditor {
             }
         }
         let bounds = self.block_bounds(thread.block)?;
-        Some(bounds.origin + Point::new(style::GUTTER_CONTROLS_WIDTH, bounds.size.height))
+        Some(bounds.origin + Point::new(px(0.), bounds.size.height))
     }
 }
 

@@ -180,6 +180,15 @@ impl NotionEditor {
         self.mouse_anchor.is_some()
     }
 
+    /// Whether a press landed on a block's content rather than in the gutter
+    /// it reaches into. A block reports the bounds of its content, so its
+    /// left edge is where the text starts.
+    fn press_is_on_content(&self, id: BlockId, position: Point<Pixels>) -> bool {
+        self.block_bounds
+            .get(&id)
+            .is_some_and(|bounds| position.x >= bounds.left())
+    }
+
     /// The block under a pointer position: the one it is inside, else the
     /// nearest one above or below, so a drag into the margins still lands.
     pub(crate) fn block_at_point(&self, position: Point<Pixels>) -> Option<BlockId> {
@@ -203,17 +212,6 @@ impl NotionEditor {
         nearest.map(|(_, id)| id)
     }
 
-    /// Whether a press at this position was aimed at the block's text rather
-    /// than at the gutter controls, which run their own drag.
-    ///
-    /// A block's reported bounds start at its content, past the gutter it
-    /// reaches into, so the content edge is the whole test.
-    fn press_is_on_text(&self, id: BlockId, position: Point<Pixels>) -> bool {
-        self.block_bounds
-            .get(&id)
-            .is_some_and(|bounds| position.x >= bounds.left())
-    }
-
     // ------------------------------------------------------------- handlers
 
     /// A press anchors a drag selection, and with Shift extends the current
@@ -231,7 +229,10 @@ impl NotionEditor {
             self.mouse_anchor = None;
             return;
         };
-        if !self.press_is_on_text(id, event.position) {
+        // A press in the gutter reach belongs to the drag handle and the `+`,
+        // which run their own drag; only a press on the block's own content
+        // starts a selection.
+        if !self.press_is_on_content(id, event.position) {
             self.mouse_anchor = None;
             return;
         }

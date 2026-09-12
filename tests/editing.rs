@@ -1558,10 +1558,15 @@ fn a_drag_that_starts_at_the_left_of_the_text_still_selects_blocks(cx: &mut Test
     harness.press("enter", cx);
     harness.type_text("two", cx);
 
-    // Press on the first glyph of a block, not in the middle of the row.
+    // Press on the first glyph of the block, not in the middle of the row.
     cx.update_window(harness.window, |_, window, cx| {
         window.render_frame(cx);
-        let from = window.find(("block", 1usize)).bounds();
+        let id = harness.editor.read(cx).block_id_at(0).unwrap();
+        let from = harness
+            .editor
+            .read(cx)
+            .block_bounds(id)
+            .expect("the block has laid out");
         let to = window.find(("block", 2usize)).bounds();
         window.drag(
             gpui_kit::point(from.left() + px(2.), from.center().y),

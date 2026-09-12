@@ -238,6 +238,14 @@ impl NotionEditor {
         Some(self.block(id)?.state.read(cx).scroll_offset())
     }
 
+    /// Re-count the wrapped rows of every block, after the width they wrap
+    /// at has changed.
+    pub(crate) fn remeasure_all(&mut self, cx: &mut Context<Self>) {
+        for id in self.blocks.iter().map(|block| block.id).collect::<Vec<_>>() {
+            self.remeasure(id, cx);
+        }
+    }
+
     /// The line height a block's input laid out with, which is the one the
     /// markers and gutter controls have to line up against.
     fn line_height_at(&self, ix: usize, cx: &App) -> Pixels {
@@ -930,9 +938,12 @@ impl NotionEditor {
         let editor = cx.entity().downgrade();
         canvas(
             move |bounds, _window, cx| {
-                let _ = editor.update(cx, |this, _| {
+                let _ = editor.update(cx, |this, cx| {
                     if (this.wrap_width - bounds.size.width).abs() > px(0.5) {
                         this.wrap_width = bounds.size.width;
+                        // Text wraps differently at a new width, so every
+                        // block's row count is worth nothing now.
+                        this.remeasure_all(cx);
                     }
                 });
             },
