@@ -73,6 +73,14 @@ pub fn link_color(cx: &App) -> Hsla {
 }
 
 /// Fill of a `highlight` mark.
+/// The most of a block's height an input may keep for itself before the
+/// measurement is treated as nonsense.
+pub const MAX_INPUT_INSET: Pixels = px(64.);
+
+/// Slack added when a text area turns out to be shorter than its text, to
+/// clear the device-pixel snapping in one step.
+pub const INPUT_INSET_SLACK: Pixels = px(2.);
+
 /// The wash behind commented text: Notion's amber, dimmed in the dark theme.
 pub fn comment_fill(cx: &App) -> Hsla {
     let rgb = if cx.theme().mode.is_dark() {

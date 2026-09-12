@@ -417,6 +417,9 @@ pub struct Block {
     /// Rows the text wraps into at the current column width. Measuring text
     /// is not free, so it is done when the text changes, not every frame.
     pub(crate) rows: usize,
+    /// Gap between the height the input is given and the height its text
+    /// area ends up with — measured, because it is the input's business.
+    pub(crate) inset: Pixels,
     pub(crate) subscriptions: Vec<Subscription>,
 }
 

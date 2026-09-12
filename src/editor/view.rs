@@ -231,6 +231,29 @@ impl NotionEditor {
             .is_some_and(|block| block.ty == types::PARAGRAPH && block.text.is_empty())
     }
 
+    /// How far a block's input has scrolled inside itself. A block sized to
+    /// its own text should never scroll; this is what proves it.
+    pub fn block_scroll_offset(&self, id: BlockId, cx: &App) -> Option<gpui_kit::Point<Pixels>> {
+        Some(self.block(id)?.state.read(cx).scroll_offset())
+    }
+
+    /// Whether a block's text area is at least as tall as the text in it.
+    ///
+    /// This is the invariant that keeps a document still: a text area shorter
+    /// than its text scrolls inside the block as the caret moves between
+    /// rows, and the text appears to jump.
+    pub fn text_area_fits_text(&self, id: BlockId, cx: &App) -> bool {
+        let Some(ix) = self.index_of(id) else {
+            return true;
+        };
+        let layout = self.layout_at(ix, cx);
+        let needed = self.block_text_height(ix, &layout, cx);
+        match self.blocks[ix].state.read(cx).text_bounds() {
+            Some(bounds) => bounds.size.height + px(0.01) >= needed,
+            None => true,
+        }
+    }
+
     /// Caret offset inside a block, in bytes.
     pub fn caret_offset(&self, id: BlockId, cx: &App) -> Option<usize> {
         Some(self.block(id)?.state.read(cx).cursor())
@@ -353,6 +376,7 @@ impl NotionEditor {
             decorations: None,
             indent: content.indent,
             rows: 1,
+            inset: style::INPUT_PAD_Y * 2.,
             subscriptions,
         };
         block.marks.clamp(block.text.len());
@@ -683,13 +707,8 @@ impl NotionEditor {
             .max(1)
     }
 
-    /// Height the block's input needs for its text.
-    ///
-    /// The input lays out inside the height it is given, so the height has to
-    /// be known before layout: it is estimated by wrapping the text the way
-    /// the text system will, then reconciled with what the last layout
-    /// actually produced.
-    pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
+    /// Height the text inside a block needs, before the input's own inset.
+    fn block_text_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
         let state = self.blocks[ix].state.read(cx);
         let line_height = state.line_height().unwrap_or(layout.line_height_px());
         let estimate = line_height * self.blocks[ix].rows.max(1) as f32;
@@ -698,7 +717,59 @@ impl NotionEditor {
             .range_to_bounds(&(0..self.blocks[ix].text.len()))
             .map(|bounds| bounds.size.height)
             .unwrap_or(estimate);
-        estimate.max(measured) + style::INPUT_PAD_Y * 2.
+        estimate.max(measured)
+    }
+
+    /// Learn how much of the height an input keeps for itself.
+    ///
+    /// A block is sized to its own text, so its input must never have to
+    /// scroll: a text area even a pixel short of its content makes the text
+    /// jump by that pixel whenever the caret moves to another row — the
+    /// document rattles as it is clicked around. The gap between the height
+    /// handed to the input and the height its text area ends up with is
+    /// measured rather than assumed, and only ever widened, because the text
+    /// area is snapped to whole device pixels and chasing that snapping in
+    /// both directions never settles.
+    pub(crate) fn sync_input_insets(&mut self, cx: &App) {
+        for ix in 0..self.blocks.len() {
+            let layout = self.layout_at(ix, cx);
+            let needed = self.block_text_height(ix, &layout, cx);
+            let Some(text_height) = self.blocks[ix]
+                .state
+                .read(cx)
+                .text_bounds()
+                .map(|bounds| bounds.size.height)
+            else {
+                continue;
+            };
+            if text_height <= px(0.) {
+                continue;
+            }
+
+            let inset = self.blocks[ix].inset;
+            if text_height < needed {
+                // One device pixel of slack on top of the shortfall, so the
+                // next frame lands over the line rather than on it.
+                let widened = inset + (needed - text_height) + style::INPUT_INSET_SLACK;
+                self.blocks[ix].inset = widened.min(style::MAX_INPUT_INSET);
+            } else if text_height - needed > style::INPUT_INSET_SLACK * 4. {
+                // Far more room than the text asks for, which happens when a
+                // block changes type or size: start over from the default.
+                self.blocks[ix].inset = style::INPUT_PAD_Y * 2.;
+            }
+        }
+    }
+
+    /// Height the block's input needs for its text.
+    ///
+    /// The input lays out inside the height it is given, so the height has to
+    /// be known before layout: it is estimated by wrapping the text the way
+    /// the text system will, reconciled with what the last layout produced,
+    /// and widened by the inset the input keeps for itself.
+    pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
+        let state = self.blocks[ix].state.read(cx);
+        let _ = state;
+        self.block_text_height(ix, layout, cx) + self.blocks[ix].inset
     }
 
     // ------------------------------------------------------------- rendering
@@ -783,12 +854,20 @@ impl NotionEditor {
             spec.wrap(&ctx, inner, window, cx)
         };
 
+        // Whatever slack the block above keeps under its text already reads
+        // as a gap, so it comes off this block's margin and the rhythm stays
+        // the one the layout asks for.
+        let above = if ix == 0 {
+            px(0.)
+        } else {
+            (self.blocks[ix - 1].inset - style::INPUT_PAD_Y * 2.).max(px(0.))
+        };
         let margin_top = if ix == 0 {
             px(0.)
         } else if layout.collapse_with_siblings && self.blocks[ix - 1].ty == self.blocks[ix].ty {
-            px(2.)
+            (px(2.) - above).max(px(0.))
         } else {
-            layout.margin_top
+            (layout.margin_top - above).max(px(0.))
         };
 
         let selected = self.selected.contains(&id);
@@ -825,7 +904,7 @@ impl NotionEditor {
     }
 
     /// Where a block sits on screen as of the last frame.
-    pub(crate) fn block_bounds(&self, id: BlockId) -> Option<Bounds<Pixels>> {
+    pub fn block_bounds(&self, id: BlockId) -> Option<Bounds<Pixels>> {
         self.block_bounds.get(&id).copied()
     }
 
@@ -946,6 +1025,7 @@ impl Focusable for NotionEditor {
 
 impl Render for NotionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_input_insets(cx);
         let in_a_block = self.refresh_focus(window, cx);
         self.refresh_focused_cell(in_a_block, window, cx);
         // Block bounds are re-reported by every block that lays out this

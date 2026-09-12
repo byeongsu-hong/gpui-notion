@@ -1229,3 +1229,120 @@ fn the_comment_box_takes_the_toolbar_off_screen(cx: &mut TestAppContext) {
         "cancelling the comment gives the selection, and the toolbar, back"
     );
 }
+
+#[gpui_kit::test]
+fn clicking_different_lines_of_a_block_does_not_move_the_page(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text(
+        "This paragraph is deliberately long enough that it wraps onto several rows inside its own input, which is where a click on one row must not change the height of anything.",
+        cx,
+    );
+    harness.press("enter", cx);
+    harness.type_text("below", cx);
+
+    let heights = |cx: &mut TestAppContext| -> (f32, f32) {
+        cx.update_window(harness.window, |_, window, cx| {
+            window.render_frame(cx);
+            (
+                f32::from(window.find(("block", 1usize)).bounds().size.height),
+                f32::from(window.find(("block", 2usize)).bounds().origin.y),
+            )
+        })
+        .unwrap()
+    };
+
+    let first = heights(cx);
+    for offset in [4., 20., 40., 60.] {
+        cx.update_window(harness.window, |_, window, cx| {
+            window.render_frame(cx);
+            window.click_at(("block", 1usize), gpui_kit::point(px(200.), px(offset)), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let now = heights(cx);
+        assert_eq!(
+            now, first,
+            "clicking at y={offset} changed the block height or what follows it"
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn clicking_the_last_row_does_not_scroll_the_block(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text(
+        "This paragraph is deliberately long enough that it wraps onto several rows inside its own input, which is where a click on one row must not shift the text that is already on screen.",
+        cx,
+    );
+
+    let offset_after_click = |y: f32, cx: &mut TestAppContext| -> (f32, f32) {
+        cx.update_window(harness.window, |_, window, cx| {
+            window.render_frame(cx);
+            window.click_at(("block", 1usize), gpui_kit::point(px(200.), px(y)), cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let editor = harness.editor.read(cx);
+            let id = editor.block_id_at(0).unwrap();
+            let offset = editor.block_scroll_offset(id, cx).unwrap();
+            (f32::from(offset.x), f32::from(offset.y))
+        })
+    };
+
+    let top = offset_after_click(4., cx);
+    let bottom = offset_after_click(60., cx);
+    assert_eq!(top, (0., 0.), "the block starts unscrolled");
+    assert_eq!(bottom, top, "clicking the last row scrolled the block");
+
+    // The reason it cannot scroll: the text area is never shorter than the
+    // text, whatever the input keeps for itself.
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for block in editor.content() {
+            let id = editor.block_id_at(0).unwrap();
+            let _ = block;
+            assert!(
+                editor.text_area_fits_text(id, cx),
+                "the text area is shorter than the text in it"
+            );
+        }
+    });
+}
+
+#[gpui_kit::test]
+fn every_block_gets_a_text_area_that_fits_its_text(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("# A heading that is long enough to wrap once it reaches the end of the column", cx);
+    harness.press("enter", cx);
+    harness.type_text(
+        "A paragraph long enough to wrap across three rows, which is the shape that makes a short text area show up as text jumping whenever the caret changes row.",
+        cx,
+    );
+    harness.press("enter", cx);
+    harness.type_text("- a list item", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        // A second frame lets the measured inset settle.
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for ix in 0..editor.content().len() {
+            let id = editor.block_id_at(ix).unwrap();
+            assert!(
+                editor.text_area_fits_text(id, cx),
+                "block {ix} has a text area shorter than its text"
+            );
+            assert_eq!(
+                editor.block_scroll_offset(id, cx).map(|p| f32::from(p.y)),
+                Some(0.),
+                "block {ix} scrolled inside itself"
+            );
+        }
+    });
+}

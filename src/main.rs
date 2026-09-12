@@ -63,6 +63,15 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
         Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
         Ok("focus") => editor.select_text_in_block(3, 5..5, window, cx),
         Ok("gutter") => editor.show_gutter_always(),
+        Ok("caret") => {
+            // Review aid: put the caret at a byte offset inside block 1, so
+            // two runs can be compared pixel by pixel.
+            let at: usize = std::env::var("NOTION_CARET")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            editor.select_text_in_block(1, at..at, window, cx);
+        }
         Ok("table") => {
             editor.show_gutter_always();
             editor.select_text_in_block(1, 0..0, window, cx);
