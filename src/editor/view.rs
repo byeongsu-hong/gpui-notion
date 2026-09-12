@@ -248,10 +248,12 @@ impl NotionEditor {
         };
         let layout = self.layout_at(ix, cx);
         let needed = self.block_text_height(ix, &layout, cx);
-        match self.blocks[ix].state.read(cx).text_bounds() {
-            Some(bounds) => bounds.size.height + px(0.01) >= needed,
-            None => true,
-        }
+        let area = self.blocks[ix]
+            .state
+            .read(cx)
+            .text_bounds()
+            .map(|bounds| bounds.size.height);
+        super::fit::InputFit::fits(needed, area)
     }
 
     /// Caret offset inside a block, in bytes.
@@ -376,7 +378,7 @@ impl NotionEditor {
             decorations: None,
             indent: content.indent,
             rows: 1,
-            inset: style::INPUT_PAD_Y * 2.,
+            fit: super::fit::InputFit::default(),
             subscriptions,
         };
         block.marks.clamp(block.text.len());
@@ -730,34 +732,22 @@ impl NotionEditor {
     /// measured rather than assumed, and only ever widened, because the text
     /// area is snapped to whole device pixels and chasing that snapping in
     /// both directions never settles.
-    pub(crate) fn sync_input_insets(&mut self, cx: &App) {
+    pub(crate) fn sync_input_insets(&mut self, cx: &mut Context<Self>) {
         for ix in 0..self.blocks.len() {
             let layout = self.layout_at(ix, cx);
             let needed = self.block_text_height(ix, &layout, cx);
-            let Some(text_height) = self.blocks[ix]
+            let area = self.blocks[ix]
                 .state
                 .read(cx)
                 .text_bounds()
-                .map(|bounds| bounds.size.height)
-            else {
-                continue;
-            };
-            if text_height <= px(0.) {
-                continue;
+                .map(|bounds| bounds.size.height);
+            if let Some(area) = area {
+                self.blocks[ix].fit.observe(needed, area);
             }
-
-            let inset = self.blocks[ix].inset;
-            if text_height < needed {
-                // One device pixel of slack on top of the shortfall, so the
-                // next frame lands over the line rather than on it.
-                let widened = inset + (needed - text_height) + style::INPUT_INSET_SLACK;
-                self.blocks[ix].inset = widened.min(style::MAX_INPUT_INSET);
-            } else if text_height - needed > style::INPUT_INSET_SLACK * 4. {
-                // Far more room than the text asks for, which happens when a
-                // block changes type or size: start over from the default.
-                self.blocks[ix].inset = style::INPUT_PAD_Y * 2.;
-            }
+            let state = self.blocks[ix].state.clone();
+            super::fit::reset_scroll_when_text_fits(&state, needed, cx);
         }
+        self.sync_cell_insets(cx);
     }
 
     /// Height the block's input needs for its text.
@@ -769,7 +759,9 @@ impl NotionEditor {
     pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
         let state = self.blocks[ix].state.read(cx);
         let _ = state;
-        self.block_text_height(ix, layout, cx) + self.blocks[ix].inset
+        self.blocks[ix]
+            .fit
+            .height(self.block_text_height(ix, layout, cx))
     }
 
     // ------------------------------------------------------------- rendering
@@ -860,7 +852,7 @@ impl NotionEditor {
         let above = if ix == 0 {
             px(0.)
         } else {
-            (self.blocks[ix - 1].inset - style::INPUT_PAD_Y * 2.).max(px(0.))
+            self.blocks[ix - 1].fit.surplus()
         };
         let margin_top = if ix == 0 {
             px(0.)

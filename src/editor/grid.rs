@@ -6,7 +6,9 @@
 //! cell is not a block.
 
 use gpui_kit::component::input::{EditorState, InputEvent};
-use gpui_kit::{AppContext as _, Context, Entity, Focusable as _, Subscription, Window};
+use gpui_kit::{App, AppContext as _, Context, Entity, Focusable as _, Pixels, Subscription, Window, px};
+
+use super::fit::InputFit;
 
 use super::block::BlockId;
 use super::view::NotionEditor;
@@ -15,6 +17,10 @@ use super::view::NotionEditor;
 pub struct Cell {
     state: Entity<EditorState>,
     text: String,
+    /// Height the text in this cell needs, as the input lays it out.
+    needed: Pixels,
+    /// How much of its height this cell's input keeps for itself.
+    fit: InputFit,
     _subscription: Subscription,
 }
 
@@ -25,6 +31,16 @@ impl Cell {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// Height the text in the cell needs, at least one row.
+    pub fn text_height(&self) -> Pixels {
+        self.needed
+    }
+
+    /// Height to give this cell's input so `text` pixels of text fit in it.
+    pub fn height(&self, text: Pixels) -> Pixels {
+        self.fit.height(text)
     }
 }
 
@@ -61,6 +77,34 @@ impl CellGrid {
 
     pub fn row(&self, row: usize) -> Option<&[Cell]> {
         self.rows.get(row).map(Vec::as_slice)
+    }
+
+    /// Height the tallest text in a row needs; every cell in the row is laid
+    /// out to it, so the row reads as one line of the table.
+    pub fn row_text_height(&self, row: usize) -> Pixels {
+        self.rows
+            .get(row)
+            .map(|cells| {
+                cells
+                    .iter()
+                    .map(Cell::text_height)
+                    .fold(px(0.), |tallest, height| tallest.max(height))
+            })
+            .unwrap_or(px(0.))
+    }
+
+    /// Height of the row's box, which the controls beside it match.
+    pub fn row_height(&self, row: usize) -> Pixels {
+        let text = self.row_text_height(row);
+        self.rows
+            .get(row)
+            .map(|cells| {
+                cells
+                    .iter()
+                    .map(|cell| cell.height(text))
+                    .fold(px(0.), |tallest, height| tallest.max(height))
+            })
+            .unwrap_or(text)
     }
 
     /// Every position, reading order, which is what Tab walks.
@@ -197,8 +241,104 @@ impl NotionEditor {
         Cell {
             state,
             text: String::new(),
+            needed: px(0.),
+            fit: InputFit::default(),
             _subscription: subscription,
         }
+    }
+
+    /// Measure what every cell's input did with the height it was given, the
+    /// way blocks are measured, so a cell never scrolls inside itself.
+    pub(crate) fn sync_cell_insets(&mut self, cx: &mut Context<Self>) {
+        for grid in self.grids.values_mut() {
+            for row in &mut grid.rows {
+                for cell in row.iter_mut() {
+                    cell.needed = super::fit::text_height(&cell.state, &cell.text, cx);
+                }
+            }
+
+            // A cell is laid out to the tallest text in its row, so that — not
+            // its own text — is the height its input has to make room for.
+            let targets: Vec<Pixels> = (0..grid.rows.len())
+                .map(|row| grid.row_text_height(row))
+                .collect();
+            for (row, cells) in grid.rows.iter_mut().enumerate() {
+                for cell in cells.iter_mut() {
+                    let area = cell
+                        .state
+                        .read(cx)
+                        .text_bounds()
+                        .map(|bounds| bounds.size.height);
+                    if let Some(area) = area {
+                        cell.fit.observe(targets[row], area);
+                    }
+                }
+            }
+        }
+
+        // Every cell of a row is laid out to the tallest text in it, so that
+        // is the height each of them has to hold.
+        let cells: Vec<(Entity<EditorState>, Pixels)> = self
+            .grids
+            .values()
+            .flat_map(|grid| {
+                grid.positions().filter_map(|at| {
+                    let cell = grid.cell(at)?;
+                    Some((cell.state.clone(), grid.row_text_height(at.row)))
+                })
+            })
+            .collect();
+        for (state, needed) in cells {
+            super::fit::reset_scroll_when_text_fits(&state, needed, cx);
+        }
+    }
+
+    /// Whether every cell of a table holds all of its text.
+    pub fn cells_fit_their_text(&self, block: BlockId, cx: &App) -> bool {
+        let Some(grid) = self.grids.get(&block) else {
+            return true;
+        };
+        grid.positions().all(|at| {
+            let Some(cell) = grid.cell(at) else {
+                return true;
+            };
+            let area = cell
+                .state
+                .read(cx)
+                .text_bounds()
+                .map(|bounds| bounds.size.height);
+            InputFit::fits(grid.row_text_height(at.row), area)
+        })
+    }
+
+    /// What a cell's input did with its height: text needed, text area it
+    /// got, its line height, and how far it scrolled.
+    pub fn cell_metrics(
+        &self,
+        block: BlockId,
+        at: CellPosition,
+        cx: &App,
+    ) -> Option<(f32, f32, f32, f32)> {
+        let grid = self.grids.get(&block)?;
+        let cell = grid.cell(at)?;
+        let state = cell.state.read(cx);
+        Some((
+            f32::from(grid.row_text_height(at.row)),
+            f32::from(
+                state
+                    .text_bounds()
+                    .map(|bounds| bounds.size.height)
+                    .unwrap_or_default(),
+            ),
+            f32::from(state.line_height().unwrap_or_default()),
+            f32::from(state.scroll_offset().y),
+        ))
+    }
+
+    /// How far a cell's input has scrolled inside itself; zero is the point.
+    pub fn cell_scroll_offset(&self, block: BlockId, at: CellPosition, cx: &App) -> Option<f32> {
+        let cell = self.grids.get(&block)?.cell(at)?;
+        Some(f32::from(cell.state.read(cx).scroll_offset().y))
     }
 
     fn set_cell_mirror(&mut self, block: BlockId, at: CellPosition, text: String, cx: &mut Context<Self>) {
@@ -210,6 +350,30 @@ impl NotionEditor {
         };
         cell.text = text;
         self.store_cells(block, cx);
+    }
+
+    /// Put text in a cell, keeping the mirror the editor measures from and
+    /// the document's copy of the table in step — what a host loading a
+    /// document calls.
+    pub fn set_cell_text(
+        &mut self,
+        block: BlockId,
+        at: CellPosition,
+        text: impl Into<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = text.into();
+        let Some(state) = self
+            .grids
+            .get(&block)
+            .and_then(|grid| grid.cell(at))
+            .map(|cell| cell.state.clone())
+        else {
+            return;
+        };
+        state.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        self.set_cell_mirror(block, at, text, cx);
     }
 
     /// Put the caret in a cell.
@@ -389,6 +553,8 @@ impl NotionEditor {
                 rebound.push(Cell {
                     state,
                     text,
+                    needed: px(0.),
+                    fit: InputFit::default(),
                     _subscription: subscription,
                 });
             }

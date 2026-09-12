@@ -944,9 +944,6 @@ pub struct Table;
 
 /// How wide a column has to be before its text wraps.
 const CELL_MIN_WIDTH: gpui_kit::Pixels = px(120.);
-/// Rows are a fixed height so the controls beside them line up with them.
-const CELL_HEIGHT: gpui_kit::Pixels = px(30.);
-const ROW_HEIGHT: gpui_kit::Pixels = px(35.);
 
 impl BlockSpec for Table {
     fn type_name(&self) -> &'static str {
@@ -983,7 +980,7 @@ impl BlockSpec for Table {
             .collect();
 
         let row_controls: Vec<AnyElement> = (0..grid.rows())
-            .map(|row| row_control(ctx, row, cx))
+            .map(|row| row_control(ctx, row, grid.row_height(row), cx))
             .collect();
 
         Some(
@@ -1031,6 +1028,10 @@ fn render_row(
     cx: &mut App,
 ) -> AnyElement {
     let header = row == 0;
+    // Every cell in a row is as tall as the tallest text in it, and each one
+    // asks its own input how much height that takes.
+    let text_height = grid.row_text_height(row);
+    let row_height = grid.row_height(row);
     let cells: Vec<AnyElement> = (0..columns)
         .filter_map(|column| {
             let cell = grid.cell(super::grid::CellPosition::new(row, column))?;
@@ -1038,8 +1039,6 @@ fn render_row(
                 div()
                     .flex_1()
                     .min_w(CELL_MIN_WIDTH)
-                    .px(px(4.))
-                    .py(px(2.))
                     .when(column + 1 < columns, |this| {
                         this.border_r_1().border_color(cx.theme().border)
                     })
@@ -1047,7 +1046,7 @@ fn render_row(
                         Editor::new(cell.state())
                             .appearance(false)
                             .bordered(false)
-                            .h(CELL_HEIGHT)
+                            .h(cell.height(text_height))
                             .text_size(px(15.))
                             .font_family(cx.theme().font_family.clone())
                             .when(header, |this| this.font_weight(FontWeight::SEMIBOLD)),
@@ -1059,7 +1058,7 @@ fn render_row(
 
     h_flex()
         .w_full()
-        .h(ROW_HEIGHT)
+        .h(row_height)
         .items_stretch()
         .when(header, |this| this.bg(cx.theme().muted.opacity(0.5)))
         .when(row + 1 <= grid.rows(), |this| {
@@ -1070,12 +1069,17 @@ fn render_row(
 }
 
 /// The control beside a row that takes the row away.
-fn row_control(ctx: &BlockContext, row: usize, _cx: &mut App) -> AnyElement {
+fn row_control(
+    ctx: &BlockContext,
+    row: usize,
+    row_height: gpui_kit::Pixels,
+    _cx: &mut App,
+) -> AnyElement {
     let id = ctx.id;
     let editor = ctx.editor.clone();
     div()
         .w(px(22.))
-        .h(ROW_HEIGHT)
+        .h(row_height)
         .flex()
         .items_center()
         .justify_center()
@@ -1128,10 +1132,14 @@ fn add_column_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
     let id = ctx.id;
     let editor = ctx.editor.clone();
     let columns = ctx.grid.map(super::grid::CellGrid::columns).unwrap_or(1);
+    let height = ctx
+        .grid
+        .map(|grid| grid.row_height(0))
+        .unwrap_or(px(32.));
     div()
         .flex_none()
         .w(px(20.))
-        .h(px(32.))
+        .h(height)
         .flex()
         .items_center()
         .justify_center()

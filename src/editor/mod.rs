@@ -12,6 +12,7 @@ pub mod block;
 pub mod blocks;
 pub mod commands;
 pub mod comments;
+pub mod fit;
 pub mod grid;
 pub mod gutter;
 pub mod history;
@@ -30,6 +31,7 @@ pub use block::{
     Block, BlockAttrs, BlockContent, BlockId, BlockRegistry, BlockSpec, BlockType, types,
 };
 pub use comments::{Comment, Thread, ThreadId};
+pub use fit::InputFit;
 pub use grid::{Cell, CellGrid, CellPosition};
 pub use mark::{HighlightColor, Mark, MarkKind, MarkList, TextColor};
 pub use view::NotionEditor;

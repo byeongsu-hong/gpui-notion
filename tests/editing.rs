@@ -1346,3 +1346,94 @@ fn every_block_gets_a_text_area_that_fits_its_text(cx: &mut TestAppContext) {
         }
     });
 }
+
+#[gpui_kit::test]
+fn a_cell_grows_to_hold_text_that_wraps(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+
+    let one_row = cx.update(|cx| {
+        f32::from(harness.editor.read(cx).grid(id).unwrap().row_text_height(0))
+    });
+
+    harness.type_text(
+        "a cell with quite a lot of text in it, far more than one row can hold",
+        cx,
+    );
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
+    let (wrapped, fits, scroll) = cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        (
+            f32::from(editor.grid(id).unwrap().row_text_height(0)),
+            editor.cells_fit_their_text(id, cx),
+            editor.cell_scroll_offset(id, CellPosition::new(0, 0), cx),
+        )
+    });
+    assert!(
+        wrapped > one_row,
+        "the row stayed {one_row} tall for text that has to wrap (now {wrapped})"
+    );
+    let metrics = cx.update(|cx| {
+        harness
+            .editor
+            .read(cx)
+            .cell_metrics(id, CellPosition::new(0, 0), cx)
+    });
+    assert!(fits, "a cell is shorter than the text in it");
+    assert_eq!(
+        scroll,
+        Some(0.),
+        "a cell scrolled inside itself; metrics (needed, area, line, scroll) = {metrics:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn every_cell_of_a_row_is_as_tall_as_the_row(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+
+    // One cell of the second row takes two lines; the rest of the row follows.
+    cx.update_window(harness.window, |_, window, cx| {
+        harness.editor.clone().update(cx, |editor, cx| {
+            editor.set_cell_text(
+                id,
+                CellPosition::new(1, 1),
+                "text long enough that this cell has to take a second line for it",
+                window,
+                cx,
+            );
+        });
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let grid = editor.grid(id).unwrap();
+        assert!(
+            grid.row_text_height(1) > grid.row_text_height(0),
+            "the row with wrapped text did not grow"
+        );
+        for column in 0..grid.columns() {
+            let at = CellPosition::new(1, column);
+            let (needed, area, _, scroll) = editor.cell_metrics(id, at, cx).unwrap();
+            assert!(
+                area + 0.01 >= needed,
+                "cell {column} has {area} of room for {needed} of text"
+            );
+            assert_eq!(scroll, 0., "cell {column} scrolled inside itself");
+        }
+        assert!(editor.cells_fit_their_text(id, cx));
+    });
+}

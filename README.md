@@ -47,10 +47,18 @@ NotionEditor (Entity)            src/editor/view.rs
 │   ├── marks: MarkList          inline formatting as byte ranges
 │   └── state: Entity<EditorState>  one gpui-kit code-editor input per block
 ├── grids: BlockId -> CellGrid   child text areas for grid blocks (tables)
+│   └── every text area is sized by measurement, never by assumed padding
 ├── comments: Vec<Thread>        discussions anchored by a mark
 ├── suggestion / link_editor / selection / history / drop_target
 └── BlockRegistry (Global)       node types, their rendering and their rules
 ```
+
+Every text area — a block, a table cell — is sized to its own text through
+[`InputFit`](src/editor/fit.rs): the gap between the height an input is handed and
+the height its text area ends up with is *measured* each frame, because that padding
+depends on the component, the theme and the display's device pixels. A text area a
+fraction short of its text scrolls inside itself as the caret moves between rows, and
+the document appears to rattle as it is clicked around.
 
 Inline formatting is painted by handing the input's decoration layer one
 `HighlightStyle` run per mark run (`view.rs::apply_decorations`); the marks themselves live
