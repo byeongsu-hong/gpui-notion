@@ -1163,3 +1163,46 @@ fn the_toolbar_waits_for_the_button_to_come_up(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
 }
+
+#[gpui_kit::test]
+fn dragging_a_selected_block_moves_the_whole_selection(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    for (ix, text) in ["one", "two", "three", "four"].iter().enumerate() {
+        if ix > 0 {
+            harness.press("enter", cx);
+        }
+        harness.type_text(text, cx);
+    }
+    assert_eq!(harness.texts(cx), vec!["one", "two", "three", "four"]);
+
+    // Select "one" and "two", then drag the handle of "one" past "four".
+    harness.ui(cx, |window, cx| {
+        window.click(("block", 1usize), cx);
+    });
+    harness.press("shift-down", cx);
+    assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 2);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", 1usize), cx);
+        window.render_frame(cx);
+        window.drag_to(("drag", 1usize), ("block", 4usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(harness.texts(cx), vec!["three", "one", "two", "four"]);
+}
+
+#[gpui_kit::test]
+fn duplicating_a_selection_copies_every_block_below_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("shift-up", cx);
+
+    harness.press("secondary-d", cx);
+    assert_eq!(harness.texts(cx), vec!["one", "two", "one", "two"]);
+    assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 2);
+}

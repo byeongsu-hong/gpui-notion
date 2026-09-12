@@ -683,6 +683,22 @@ impl NotionEditor {
 
     pub fn duplicate_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.record(Step::Structural, cx);
+        // A selection duplicates whole, below itself, and stays selected.
+        if self.has_block_selection() {
+            let indexes = self.selected_indexes();
+            let Some(&last) = indexes.last() else { return };
+            let copies: Vec<BlockContent> = indexes
+                .iter()
+                .map(|ix| self.blocks[*ix].content())
+                .collect();
+            let mut made = Vec::new();
+            for (offset, content) in copies.into_iter().enumerate() {
+                made.push(self.insert_block(last + 1 + offset, content, window, cx));
+            }
+            self.selected = made;
+            cx.notify();
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         let content = self.blocks[ix].content();
         let id = self.insert_block(ix + 1, content, window, cx);
@@ -690,6 +706,10 @@ impl NotionEditor {
     }
 
     pub fn delete_active_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_block_selection() {
+            self.delete_selected_blocks(window, cx);
+            return;
+        }
         self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         if self.blocks.len() == 1 {
@@ -728,6 +748,36 @@ impl NotionEditor {
         let block = self.blocks.remove(from);
         let to = if to > from { to - 1 } else { to };
         self.blocks.insert(to.min(self.blocks.len()), block);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    /// Move a run of blocks so that they land before what is currently at
+    /// `to`, keeping the order they had.
+    pub fn reorder_blocks(&mut self, ids: &[BlockId], to: usize, cx: &mut Context<Self>) {
+        if ids.len() <= 1 {
+            if let Some(from) = ids.first().and_then(|id| self.index_of(*id)) {
+                self.reorder_block(from, to, cx);
+            }
+            return;
+        }
+        self.record(Step::Structural, cx);
+
+        // The landing place is named by the block that is there now, so that
+        // taking the moved blocks out cannot shift it.
+        let anchor = self.blocks.get(to).map(|block| block.id);
+        let mut moving = Vec::new();
+        for id in ids {
+            let Some(ix) = self.index_of(*id) else { continue };
+            moving.push(self.blocks.remove(ix));
+        }
+        let at = match anchor.and_then(|id| self.index_of(id)) {
+            Some(ix) => ix,
+            None => self.blocks.len(),
+        };
+        for (offset, block) in moving.into_iter().enumerate() {
+            self.blocks.insert((at + offset).min(self.blocks.len()), block);
+        }
         cx.emit(DocumentChanged);
         cx.notify();
     }

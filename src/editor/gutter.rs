@@ -170,15 +170,20 @@ impl NotionEditor {
         let Some(target) = self.drop_target.take() else {
             return;
         };
-        let Some(from) = self.index_of(dragged.id) else {
-            return;
-        };
         let to = if target.below {
             target.index + 1
         } else {
             target.index
         };
-        self.reorder_block(from, to, cx);
+
+        // Dragging one of several selected blocks moves the whole selection,
+        // which is what having selected them was for.
+        let moving: Vec<BlockId> = if self.selected_blocks().contains(&dragged.id) {
+            self.selected_blocks()
+        } else {
+            vec![dragged.id]
+        };
+        self.reorder_blocks(&moving, to, cx);
         cx.notify();
     }
 
