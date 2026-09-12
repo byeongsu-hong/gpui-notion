@@ -12,7 +12,8 @@ cargo test           # unit tests + UI integration tests
 ## What it does
 
 - **Blocks**: paragraph, heading 1–3, bullet / numbered / to-do lists (nested), blockquote,
-  code block with syntax highlighting, separator, image, callout, toggle.
+  code block with syntax highlighting and a language menu, separator, image (click or drop
+  a file), callout, toggle.
 - **Inline marks**: bold, italic, underline, strike, code, link, highlight (10 colors),
   text color (10 colors), mention.
 - **Markdown input rules**: `# `, `## `, `### `, `- `, `* `, `+ `, `1. `, `[] `, `[x] `,
@@ -140,5 +141,6 @@ NOTION_DEMO=toolbar cargo run    # open the window with the selection toolbar sh
 Some template behaviour cannot be expressed on this stack today, and is recorded as such in
 `docs/PARITY.md`: GPUI's `HighlightStyle` carries no font size or family, so per-range font
 switching (real superscript baselines, monospace inline code) is unavailable, and
-multi-line inputs do not support per-block text alignment. Tables and image uploading are
-not implemented.
+multi-line inputs do not support per-block text alignment. Tables are not implemented, and
+image blocks take a picked or dropped file but have no upload progress, size limits or
+captions.
