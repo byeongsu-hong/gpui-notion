@@ -415,7 +415,8 @@ impl NotionEditor {
         }
         let tail_marks = tail_marks.split_off(start);
 
-        let (ty, mut attrs) = spec.split_into(&self.blocks[ix].attrs);
+        let at_end = end >= text.len();
+        let (ty, mut attrs) = spec.split_into(&self.blocks[ix].attrs, at_end);
         attrs.checked = false;
         let content = BlockContent {
             ty,
@@ -523,6 +524,8 @@ impl NotionEditor {
             return false;
         }
         self.blocks[ix].indent += 1;
+        let id = self.blocks[ix].id;
+        self.remeasure(id, cx);
         cx.emit(DocumentChanged);
         cx.notify();
         true
@@ -536,6 +539,8 @@ impl NotionEditor {
         };
         if self.blocks[ix].indent > 0 {
             self.blocks[ix].indent -= 1;
+            let id = self.blocks[ix].id;
+            self.remeasure(id, cx);
             cx.emit(DocumentChanged);
             cx.notify();
             return true;
@@ -627,6 +632,7 @@ impl NotionEditor {
                 state.set_selected_range(caret..caret, cx);
             }
         });
+        self.remeasure(id, cx);
         self.apply_decorations(id, cx);
         cx.emit(DocumentChanged);
         cx.notify();

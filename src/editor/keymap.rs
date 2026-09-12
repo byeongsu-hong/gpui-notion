@@ -180,6 +180,17 @@ impl NotionEditor {
             .on_action(cx.listener(|this, _: &actions::CopyBlock, _window, cx| {
                 this.copy_active_block(cx)
             }))
+            .on_action(cx.listener(|this, _: &actions::OpenEmojiMenu, window, cx| {
+                this.open_suggestion(super::suggestion::Trigger::Emoji, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &actions::OpenMentionMenu, window, cx| {
+                    this.open_suggestion(super::suggestion::Trigger::Mention, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &actions::InsertImage, window, cx| {
+                this.set_image("", "", window, cx)
+            }))
             .on_action(cx.listener(|this, _: &actions::SetLink, window, cx| {
                 this.open_link_editor(window, cx)
             }))
@@ -304,6 +315,14 @@ impl NotionEditor {
             return;
         }
         if self.focus_sibling(ix, 1, Caret::Start, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        // Down from the last block leaves a code block or any other node with
+        // somewhere to go, as Tiptap's `exitOnArrowDown` does.
+        if ix + 1 == self.block_count() && !self.block_is_empty_paragraph(ix) {
+            let id = self.ensure_paragraph_after(ix, window, cx);
+            self.focus_block(id, Caret::Start, window, cx);
             cx.stop_propagation();
         }
     }

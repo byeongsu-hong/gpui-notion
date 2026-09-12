@@ -73,6 +73,11 @@ fn main() {
         gpui_kit::init(cx);
         editor::init(cx);
 
+        // Review aid: `NOTION_THEME=dark` starts in the dark palette.
+        if std::env::var("NOTION_THEME").as_deref() == Ok("dark") {
+            gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
+        }
+
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1100.), px(860.)), cx)),
             ..Default::default()

@@ -275,8 +275,12 @@ pub trait BlockSpec: 'static + Send + Sync {
     }
 
     /// The node type a new block takes when Enter splits this one.
-    fn split_into(&self, attrs: &BlockAttrs) -> (BlockType, BlockAttrs) {
-        let _ = attrs;
+    ///
+    /// `at_end` says whether the caret sat at the end of the text, which is
+    /// what decides a heading's answer: Enter at the end of a heading starts a
+    /// paragraph, Enter inside it makes a second heading.
+    fn split_into(&self, attrs: &BlockAttrs, at_end: bool) -> (BlockType, BlockAttrs) {
+        let (_, _) = (attrs, at_end);
         (types::PARAGRAPH.into(), BlockAttrs::default())
     }
 
@@ -387,6 +391,9 @@ pub struct Block {
     pub decorations: Option<TextDecorationCollection>,
     /// Nesting depth inside lists; 0 at the top level.
     pub indent: usize,
+    /// Rows the text wraps into at the current column width. Measuring text
+    /// is not free, so it is done when the text changes, not every frame.
+    pub(crate) rows: usize,
     pub subscriptions: Vec<Subscription>,
 }
 

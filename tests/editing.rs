@@ -678,3 +678,82 @@ fn a_colon_in_prose_does_not_hold_a_menu_open(cx: &mut TestAppContext) {
     assert!(!cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
     assert_eq!(harness.texts(cx), vec!["note: something"]);
 }
+
+#[gpui_kit::test]
+fn arrow_down_leaves_a_code_block_at_the_end_of_the_document(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("```", cx);
+    harness.type_text(" ", cx);
+    assert_eq!(harness.types(cx), vec![types::CODE_BLOCK]);
+
+    harness.type_text("let x = 1;", cx);
+    harness.press("down", cx);
+
+    assert_eq!(
+        harness.types(cx),
+        vec![types::CODE_BLOCK, types::PARAGRAPH]
+    );
+    assert_eq!(harness.caret(cx).map(|(ix, _)| ix), Some(1));
+}
+
+#[gpui_kit::test]
+fn enter_inside_a_code_block_adds_a_line(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("``` ", cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    assert_eq!(harness.texts(cx), vec!["one\ntwo"]);
+    assert_eq!(harness.types(cx), vec![types::CODE_BLOCK]);
+}
+
+#[gpui_kit::test]
+fn enter_in_the_middle_of_a_heading_keeps_both_halves_headings(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("# one two", cx);
+    for _ in 0..4 {
+        harness.press("left", cx);
+    }
+    harness.press("enter", cx);
+
+    assert_eq!(harness.texts(cx), vec!["one", " two"]);
+    assert_eq!(harness.types(cx), vec![types::HEADING, types::HEADING]);
+
+    // At the end of a heading, Enter starts a paragraph instead.
+    harness.press("end", cx);
+    harness.press("enter", cx);
+    assert_eq!(
+        harness.types(cx),
+        vec![types::HEADING, types::HEADING, types::PARAGRAPH]
+    );
+}
+
+#[gpui_kit::test]
+fn the_slash_menu_groups_items_in_template_order(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/", cx);
+
+    let groups: Vec<&str> = cx.update(|cx| {
+        let mut seen: Vec<&str> = Vec::new();
+        for item in harness.editor.read(cx).suggestion_items(cx) {
+            if seen.last() != Some(&item.group()) {
+                seen.push(item.group());
+            }
+        }
+        seen
+    });
+    assert_eq!(groups, vec!["Style", "Insert", "Upload"]);
+}
+
+#[gpui_kit::test]
+fn the_emoji_entry_of_the_slash_menu_opens_the_emoji_menu(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/emoji", cx);
+    harness.press("enter", cx);
+
+    assert!(cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+    harness.type_text("rocket", cx);
+    harness.press("enter", cx);
+    assert_eq!(harness.texts(cx), vec!["🚀"]);
+}

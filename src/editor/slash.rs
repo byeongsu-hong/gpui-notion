@@ -58,6 +58,17 @@ impl SuggestionItem {
     }
 }
 
+/// Group order of the menu, matching the template's AI → Style → Insert →
+/// Upload. Groups a block spec invents are appended after these.
+const GROUP_ORDER: &[&str] = &["AI", "Style", "Insert", "Upload", "Emoji", "People"];
+
+fn group_rank(group: &str) -> usize {
+    GROUP_ORDER
+        .iter()
+        .position(|known| *known == group)
+        .unwrap_or(GROUP_ORDER.len())
+}
+
 impl NotionEditor {
     pub fn suggestion_is_open(&self) -> bool {
         self.suggestion.is_some()
@@ -72,20 +83,35 @@ impl NotionEditor {
 
     /// Open the block menu at the caret, inserting the `/` if needed.
     pub fn open_slash_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_suggestion(Trigger::Slash, window, cx);
+    }
+
+    /// Open a menu at the caret, typing its trigger character if it is not
+    /// already there — what the gutter `+`, `Mod+/` and the menu's own
+    /// Mention and Emoji entries do.
+    pub fn open_suggestion(&mut self, trigger: Trigger, window: &mut Window, cx: &mut Context<Self>) {
         let Some(ix) = self.active_index() else { return };
         if !self.spec_at(ix, cx).caps().input_rules {
             return;
         }
+        let character = trigger.character();
         let caret = self.blocks[ix].state.read(cx).cursor();
-        let already_slash = self.blocks[ix].text[..caret].ends_with('/');
-        if !already_slash {
-            self.edit_block_text(ix, caret..caret, "/", Some(caret + 1), window, cx);
+        let present = self.blocks[ix].text[..caret].ends_with(character);
+        if !present {
+            let mut typed = String::new();
+            // A trigger needs whitespace in front of it to count as one.
+            if caret > 0 && !self.blocks[ix].text[..caret].ends_with(char::is_whitespace) {
+                typed.push(' ');
+            }
+            typed.push(character);
+            let caret_after = caret + typed.len();
+            self.edit_block_text(ix, caret..caret, &typed, Some(caret_after), window, cx);
         }
-        let start = if already_slash { caret - 1 } else { caret };
+        let caret = self.blocks[ix].state.read(cx).cursor();
         self.suggestion = Some(SuggestionMenu {
-            trigger: Trigger::Slash,
+            trigger,
             block: self.blocks[ix].id,
-            start,
+            start: caret - character.len_utf8(),
             query: String::new(),
             selected: 0,
         });
@@ -171,17 +197,31 @@ impl NotionEditor {
         let query = menu.query.clone();
 
         match menu.trigger {
-            Trigger::Slash => BlockRegistry::global(cx)
-                .slash_items()
-                .into_iter()
-                .filter(|item| matches(&query, item.title, item.keywords))
-                .map(|item| SuggestionItem::Block {
-                    title: item.title,
-                    group: item.group,
-                    icon: item.icon,
-                    run: item.run,
-                })
-                .collect(),
+            Trigger::Slash => {
+                let mut items: Vec<SuggestionItem> = BlockRegistry::global(cx)
+                    .slash_items()
+                    .into_iter()
+                    .chain(TRIGGER_ITEMS.iter().map(|item| super::block::SlashItem {
+                        title: item.title,
+                        subtext: item.subtext,
+                        keywords: item.keywords,
+                        group: item.group,
+                        icon: item.icon,
+                        run: item.run,
+                    }))
+                    .filter(|item| matches(&query, item.title, item.keywords))
+                    .map(|item| SuggestionItem::Block {
+                        title: item.title,
+                        group: item.group,
+                        icon: item.icon,
+                        run: item.run,
+                    })
+                    .collect();
+                // Groups appear in the template's order; items keep the order
+                // their specs were registered in.
+                items.sort_by_key(|item| group_rank(item.group()));
+                items
+            }
             Trigger::Emoji => {
                 if query.is_empty() {
                     return Vec::new();
@@ -378,6 +418,26 @@ impl NotionEditor {
         )
     }
 }
+
+/// Menu entries that open another menu, so `/` can reach emoji and mentions.
+const TRIGGER_ITEMS: &[super::block::SlashItem] = &[
+    super::block::SlashItem {
+        title: "Mention",
+        subtext: "Mention a user or item",
+        keywords: &["mention", "user", "item", "tag"],
+        group: "Insert",
+        icon: "at-sign",
+        run: |editor, window, cx| editor.open_suggestion(Trigger::Mention, window, cx),
+    },
+    super::block::SlashItem {
+        title: "Emoji",
+        subtext: "Insert an emoji",
+        keywords: &["emoji", "emoticon", "smiley"],
+        group: "Insert",
+        icon: "smile",
+        run: |editor, window, cx| editor.open_suggestion(Trigger::Emoji, window, cx),
+    },
+];
 
 /// Mentions are styled like a soft chip; the mark carries the person's id.
 pub fn mention_mark_id(kind: &MarkKind) -> Option<SharedString> {

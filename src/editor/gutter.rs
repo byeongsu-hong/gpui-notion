@@ -216,8 +216,13 @@ fn block_menu(
 ) -> PopupMenu {
     let _ = id;
     let turn_into_focus = focus.clone();
+    let color_focus = focus.clone();
     menu.action_context(focus)
         .label(label)
+        .submenu("Color", window, cx, {
+            let focus = color_focus.clone();
+            move |menu, _, _| color_menu(focus.clone(), menu)
+        })
         .submenu("Turn into", window, cx, {
             let focus = turn_into_focus.clone();
             move |menu, _, _| {
@@ -254,4 +259,19 @@ fn draggable(mut button: Button, id: BlockId, text: String) -> Button {
             cx.new(|_| DragPreview { text: text.clone() })
         });
     button
+}
+
+/// The text and highlight palettes, shared with the selection toolbar.
+fn color_menu(focus: gpui_kit::FocusHandle, menu: PopupMenu) -> PopupMenu {
+    use super::mark::{HighlightColor, TextColor};
+
+    let mut menu = menu.action_context(focus).label("Text color");
+    for color in TextColor::ALL {
+        menu = menu.menu(color.label(), Box::new(actions::ApplyColor::Text(color)));
+    }
+    menu = menu.separator().label("Highlight color");
+    for color in HighlightColor::ALL {
+        menu = menu.menu(color.label(), Box::new(actions::ApplyColor::Highlight(color)));
+    }
+    menu
 }

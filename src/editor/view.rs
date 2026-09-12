@@ -189,6 +189,14 @@ impl NotionEditor {
         self.focus_block(id, Caret::End, window, cx);
     }
 
+    /// Whether the block at `ix` is an empty paragraph, i.e. nothing would be
+    /// gained by appending another one after it.
+    pub(crate) fn block_is_empty_paragraph(&self, ix: usize) -> bool {
+        self.blocks
+            .get(ix)
+            .is_some_and(|block| block.ty == types::PARAGRAPH && block.text.is_empty())
+    }
+
     /// Focus handle of the block at `ix`, for tests and hosts.
     pub fn block_focus_handle(&self, ix: usize, cx: &App) -> Option<FocusHandle> {
         use gpui_kit::Focusable as _;
@@ -300,12 +308,14 @@ impl NotionEditor {
             state,
             decorations: None,
             indent: content.indent,
+            rows: 1,
             subscriptions,
         };
         block.marks.clamp(block.text.len());
 
         let ix = ix.min(self.blocks.len());
         self.blocks.insert(ix, block);
+        self.remeasure(id, cx);
         self.apply_decorations(id, cx);
         cx.emit(DocumentChanged);
         cx.notify();
@@ -366,6 +376,7 @@ impl NotionEditor {
                 .update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
         }
 
+        self.remeasure(id, cx);
         self.apply_decorations(id, cx);
         cx.emit(DocumentChanged);
         cx.notify();
@@ -416,6 +427,7 @@ impl NotionEditor {
             self.blocks[ix].marks.clamp(new_text.len());
         }
 
+        self.remeasure(id, cx);
         self.apply_decorations(id, cx);
         if pasted && self.split_pasted_lines(id, window, cx) {
             return;
@@ -588,6 +600,15 @@ impl NotionEditor {
     }
 
     /// Rows the text wraps into at the current column width.
+    /// Re-measure a block's wrapped height. Called when its text, type or
+    /// nesting changes — the only things that can change it.
+    pub(crate) fn remeasure(&mut self, id: BlockId, cx: &App) {
+        let Some(ix) = self.index_of(id) else { return };
+        let layout = self.layout_at(ix, cx);
+        let rows = self.measure_rows(ix, &layout, cx);
+        self.blocks[ix].rows = rows;
+    }
+
     fn measure_rows(&self, ix: usize, layout: &BlockLayout, cx: &App) -> usize {
         let block = &self.blocks[ix];
         let wrap_width = self.wrap_width
@@ -624,7 +645,7 @@ impl NotionEditor {
     pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
         let state = self.blocks[ix].state.read(cx);
         let line_height = state.line_height().unwrap_or(layout.line_height_px());
-        let estimate = line_height * self.measure_rows(ix, layout, cx) as f32;
+        let estimate = line_height * self.blocks[ix].rows.max(1) as f32;
 
         let measured = state
             .range_to_bounds(&(0..self.blocks[ix].text.len()))

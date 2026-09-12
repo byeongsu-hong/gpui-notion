@@ -80,11 +80,13 @@ impl BlockSpec for Heading {
     fn layout(&self, attrs: &BlockAttrs) -> BlockLayout {
         // 1.5em / 1.25em / 1.125em over a 1rem base, with the template's
         // em-relative top margins resolved against each heading's own size.
+        // The template's heading margins are em-relative to each heading's own
+        // size: 3em, 2.5em, 2em.
         let (size, weight, margin_em) = match attrs.level.max(1) {
-            1 => (px(24.), FontWeight::BOLD, 1.35),
-            2 => (px(20.), FontWeight::BOLD, 1.5),
-            3 => (px(18.), FontWeight::SEMIBOLD, 1.6),
-            _ => (px(16.), FontWeight::SEMIBOLD, 1.6),
+            1 => (px(24.), FontWeight::BOLD, 3.0),
+            2 => (px(20.), FontWeight::BOLD, 2.5),
+            3 => (px(18.), FontWeight::SEMIBOLD, 2.0),
+            _ => (px(16.), FontWeight::SEMIBOLD, 2.0),
         };
         BlockLayout {
             text_size: size,
@@ -102,6 +104,14 @@ impl BlockSpec for Heading {
 
     fn placeholder_always(&self) -> bool {
         true
+    }
+
+    fn split_into(&self, attrs: &BlockAttrs, at_end: bool) -> (BlockType, BlockAttrs) {
+        if at_end {
+            (types::PARAGRAPH.into(), BlockAttrs::default())
+        } else {
+            (types::HEADING.into(), attrs.clone())
+        }
     }
 
     fn input_rules(&self) -> Vec<BlockInputRule> {
@@ -150,7 +160,7 @@ fn list_layout() -> BlockLayout {
     BlockLayout {
         // A list gets air above it; items inside it sit tight together,
         // which `collapse_with_siblings` takes care of.
-        margin_top: px(20.),
+        margin_top: px(24.),
         leading_width: px(24.),
         collapse_with_siblings: true,
         ..Default::default()
@@ -180,7 +190,7 @@ impl BlockSpec for BulletList {
         "List".into()
     }
 
-    fn split_into(&self, _: &BlockAttrs) -> (BlockType, BlockAttrs) {
+    fn split_into(&self, _: &BlockAttrs, _: bool) -> (BlockType, BlockAttrs) {
         (types::BULLET_LIST.into(), BlockAttrs::default())
     }
 
@@ -243,7 +253,7 @@ impl BlockSpec for OrderedList {
         "List".into()
     }
 
-    fn split_into(&self, _: &BlockAttrs) -> (BlockType, BlockAttrs) {
+    fn split_into(&self, _: &BlockAttrs, _: bool) -> (BlockType, BlockAttrs) {
         (types::ORDERED_LIST.into(), BlockAttrs::default())
     }
 
@@ -359,7 +369,7 @@ impl BlockSpec for TaskList {
         "To-do".into()
     }
 
-    fn split_into(&self, _: &BlockAttrs) -> (BlockType, BlockAttrs) {
+    fn split_into(&self, _: &BlockAttrs, _: bool) -> (BlockType, BlockAttrs) {
         (types::TASK_LIST.into(), BlockAttrs::default())
     }
 
