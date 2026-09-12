@@ -385,7 +385,9 @@ impl NotionEditor {
             return;
         };
         self.clear_block_selection(cx);
-        state.focus_handle(cx).focus(window, cx);
+        // Through the state, not the handle: focusing the state also starts
+        // the blink cursor, which is what paints the caret.
+        state.update(cx, |state, cx| state.focus(window, cx));
         self.focused_cell = Some((block, at));
         cx.notify();
     }
@@ -414,8 +416,11 @@ impl NotionEditor {
         });
         match found {
             Some(found) => self.focused_cell = Some(found),
+            // Nothing in a grid holds the caret. A popover that was opened
+            // from a cell keeps it; anything else means the caret left.
+            None if self.link_editor_is_open() || self.comment_draft_is_open() => {}
             None if in_a_block || self.has_block_selection() => self.focused_cell = None,
-            None => {}
+            None => self.focused_cell = None,
         }
     }
 
@@ -517,12 +522,12 @@ impl NotionEditor {
         let Some(grid) = self.grids.get(&block) else {
             return;
         };
-        let states: Vec<Vec<(Entity<EditorState>, String)>> = grid
+        let states: Vec<Vec<(Entity<EditorState>, String, Pixels, InputFit)>> = grid
             .rows
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(|cell| (cell.state.clone(), cell.text.clone()))
+                    .map(|cell| (cell.state.clone(), cell.text.clone(), cell.needed, cell.fit))
                     .collect()
             })
             .collect();
@@ -530,7 +535,7 @@ impl NotionEditor {
         let mut rows = Vec::new();
         for (row, cells) in states.into_iter().enumerate() {
             let mut rebound = Vec::new();
-            for (column, (state, text)) in cells.into_iter().enumerate() {
+            for (column, (state, text, needed, fit)) in cells.into_iter().enumerate() {
                 let at = CellPosition::new(row, column);
                 let subscription = cx.subscribe_in(
                     &state,
@@ -542,11 +547,13 @@ impl NotionEditor {
                         }
                     },
                 );
+                // The input entity survives the rebuild, so what it taught us
+                // about its inset survives with it.
                 rebound.push(Cell {
                     state,
                     text,
-                    needed: px(0.),
-                    fit: InputFit::default(),
+                    needed,
+                    fit,
                     _subscription: subscription,
                 });
             }

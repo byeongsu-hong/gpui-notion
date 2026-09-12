@@ -193,6 +193,11 @@ impl NotionEditor {
         cx.notify();
     }
 
+    /// The drop target, for tests that check a drag cleaned up after itself.
+    pub fn drop_target_for_test(&self) -> Option<DropTarget> {
+        self.drop_target
+    }
+
     pub(crate) fn drop_indicator(&self, ix: usize, cx: &App) -> Option<impl IntoElement> {
         let target = self.drop_target?;
         if target.index != ix {

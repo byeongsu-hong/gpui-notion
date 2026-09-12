@@ -10,7 +10,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable as _, Sizable as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-    Anchor, AnyElement, App, AppContext as _, Context, Entity, Focusable as _,
+    Anchor, AnyElement, App, AppContext as _, Context, Entity,
     IntoElement, ParentElement as _, Point, SharedString, Styled as _,
     Subscription, Window, deferred, div, px,
 };
@@ -189,7 +189,7 @@ impl NotionEditor {
                 }
             });
 
-        input.focus_handle(cx).focus(window, cx);
+        input.update(cx, |input, cx| input.focus(window, cx));
         self.open_thread = Some(thread);
         self.comment_draft = Some(CommentDraft {
             thread,

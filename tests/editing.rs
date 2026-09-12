@@ -1652,3 +1652,103 @@ fn the_toolbar_over_a_block_selection_lines_up_with_its_text(cx: &mut TestAppCon
         );
     });
 }
+
+#[gpui_kit::test]
+fn focus_leaving_the_blocks_takes_the_toolbar_with_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("some words", cx);
+    harness.press("enter", cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+
+    // Select text in the paragraph, then put the caret in a table cell.
+    harness.ui(cx, |window, cx| {
+        window.click(("block", 1usize), cx);
+        window.press("secondary-a", cx);
+    });
+    assert!(cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(1).unwrap());
+    cx.update_window(harness.window, |_, window, cx| {
+        harness.editor.clone().update(cx, |editor, cx| {
+            editor.focus_cell(id, CellPosition::new(0, 0), window, cx)
+        });
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(
+            editor.focused_id().is_none(),
+            "a block still claims the caret after it moved into a table"
+        );
+        assert!(
+            !editor.selection_toolbar_visible(cx),
+            "the toolbar stayed over text the caret has left"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_drag_let_go_away_from_the_blocks_clears_the_drop_line(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", 1usize), cx);
+        window.render_frame(cx);
+        let from = window.find(("drag", 1usize)).bounds().center();
+        let below = window.find(("trailing-space")).bounds().center();
+        window.drag(from, below, cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(
+            editor.drop_target_for_test().is_none(),
+            "the drop line outlived the drag"
+        );
+    });
+    // And the toolbar works again, which a stuck drop target used to prevent.
+    harness.ui(cx, |window, cx| {
+        window.click(("block", 1usize), cx);
+        window.press("secondary-a", cx);
+    });
+    assert!(cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+}
+
+#[gpui_kit::test]
+fn deleting_a_table_takes_its_cells_with_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+    assert!(cx.update(|cx| harness.editor.read(cx).grid(id).is_some()));
+
+    cx.update_window(harness.window, |_, window, cx| {
+        harness
+            .editor
+            .clone()
+            .update(cx, |editor, cx| editor.delete_active_block(window, cx));
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(editor.grid(id).is_none(), "the grid outlived its block");
+        assert!(
+            editor.focused_cell().is_none(),
+            "a cell of the deleted table still holds the caret"
+        );
+    });
+}

@@ -33,9 +33,10 @@ impl super::view::NotionEditor {
         if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
-        // A comment box owns the selection while it is open; two surfaces
-        // over one range is one too many.
-        if self.comment_draft_is_open() {
+        // A comment box or a link card owns the selection while it is open;
+        // two surfaces over one range is one too many, and they hang at the
+        // same point.
+        if self.comment_draft_is_open() || self.link_editor_is_open() {
             return false;
         }
         // While the button is still down the selection is still being made;
@@ -46,6 +47,12 @@ impl super::view::NotionEditor {
         }
         if self.has_block_selection() {
             return true;
+        }
+        // A selection belongs to the block that holds the caret; with the
+        // caret elsewhere — a table cell, another window — there is nothing
+        // for the toolbar to act on.
+        if self.focused_id().is_none() {
+            return false;
         }
         let Some((id, range)) = self.selection(cx) else {
             return false;

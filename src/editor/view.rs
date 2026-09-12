@@ -156,8 +156,21 @@ impl NotionEditor {
             .iter()
             .find(|block| block.state.focus_handle(cx).is_focused(window))
             .map(|block| block.id);
-        if focused.is_none() || focused == self.focused {
+        if focused == self.focused {
             return focused.is_some();
+        }
+        if focused.is_none() {
+            // Focus went somewhere that is not a block. A popover that edits
+            // the block it came from keeps it; anything else — a table cell,
+            // another window — means no block holds the caret, and the
+            // toolbar, the placeholder and every command have to know.
+            if self.link_editor_is_open() || self.comment_draft_is_open() {
+                return false;
+            }
+            self.focused = None;
+            self.sync_placeholders(window, cx);
+            cx.notify();
+            return false;
         }
         self.focused = focused;
         self.selected.clear();
@@ -236,6 +249,13 @@ impl NotionEditor {
     /// its own text should never scroll; this is what proves it.
     pub fn block_scroll_offset(&self, id: BlockId, cx: &App) -> Option<gpui_kit::Point<Pixels>> {
         Some(self.block(id)?.state.read(cx).scroll_offset())
+    }
+
+    /// Forget a drop target, however the drag ended.
+    pub(crate) fn clear_drop_target(&mut self, cx: &mut Context<Self>) {
+        if self.drop_target.take().is_some() {
+            cx.notify();
+        }
     }
 
     /// Re-count the wrapped rows of every block, after the width they wrap
@@ -429,12 +449,21 @@ impl NotionEditor {
         if self.focused == Some(id) {
             self.focused = None;
         }
+        // A grid belongs to its block: leaving it behind keeps its cells
+        // alive, and a focused cell of a deleted table still answers Tab.
+        self.grids.remove(&id);
+        if self.focused_cell.is_some_and(|(block, _)| block == id) {
+            self.focused_cell = None;
+        }
         self.selected.retain(|s| *s != id);
         cx.emit(DocumentChanged);
         cx.notify();
     }
 
     /// Replace a block's node type, keeping its text and marks.
+    ///
+    /// The new type may have a different size and line height, so what the
+    /// old one learned about its input's inset is worth nothing.
     pub fn set_block_type(
         &mut self,
         id: BlockId,
@@ -454,6 +483,16 @@ impl NotionEditor {
 
         self.blocks[ix].ty = ty.clone();
         self.blocks[ix].attrs = attrs;
+        // Text size and line height come from the type, so the inset this
+        // block learned belongs to the type it no longer is.
+        self.blocks[ix].fit = super::fit::InputFit::default();
+        // A type that holds no grid holds no cells either.
+        if !caps.grid {
+            self.grids.remove(&id);
+            if self.focused_cell.is_some_and(|(block, _)| block == id) {
+                self.focused_cell = None;
+            }
+        }
         if !caps.marks {
             self.blocks[ix].marks.clear();
         }
@@ -951,8 +990,10 @@ impl NotionEditor {
                     if (this.wrap_width - bounds.size.width).abs() > px(0.5) {
                         this.wrap_width = bounds.size.width;
                         // Text wraps differently at a new width, so every
-                        // block's row count is worth nothing now.
+                        // block's row count is worth nothing now, and the
+                        // frame that is being laid out was built from it.
                         this.remeasure_all(cx);
+                        cx.notify();
                     }
                 });
             },
@@ -1117,6 +1158,13 @@ impl Render for NotionEditor {
             .capture_any_mouse_down(cx.listener(Self::on_page_mouse_down))
             .on_mouse_move(cx.listener(Self::on_page_mouse_move))
             .capture_any_mouse_up(cx.listener(Self::on_page_mouse_up))
+            // A drag let go anywhere — over the margin, the trailing space,
+            // another window — ends it. Bubble phase, so a row that was
+            // dropped on has already taken the drop.
+            .on_mouse_up(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|this, _, _window, cx| this.clear_drop_target(cx)),
+            )
             .child(
                 v_flex()
                     .id("page")
