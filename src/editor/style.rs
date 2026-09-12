@@ -35,9 +35,6 @@ pub const INPUT_PAD_X: Pixels = px(10.);
 /// Vertical counterpart (`Size::Medium::input_py`).
 pub const INPUT_PAD_Y: Pixels = px(8.);
 
-/// Radius of popovers (slash menu, bubble toolbar, link editor).
-pub const POPOVER_RADIUS: Pixels = px(8.);
-
 /// Text color of a block, and of inline text colors.
 pub fn text_color(cx: &App) -> Hsla {
     cx.theme().foreground

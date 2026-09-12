@@ -137,6 +137,11 @@ const ROW_SEPARATOR: char = '\u{1e}';
 const CELL_SEPARATOR: char = '\u{1f}';
 const CELLS_ATTRIBUTE: &str = "cells";
 
+/// A cell's row height before it has laid out once: the table's text size
+/// through its line-height ratio (`blocks::CELL_TEXT_SIZE * ..RATIO`). Once a
+/// cell has laid out, its own line height is used instead.
+pub(crate) const CELL_LINE_HEIGHT: Pixels = px(22.5);
+
 /// What a table starts as when nothing says otherwise.
 const DEFAULT_ROWS: usize = 3;
 const DEFAULT_COLUMNS: usize = 3;
@@ -245,7 +250,8 @@ impl NotionEditor {
         for grid in self.grids.values_mut() {
             for row in &mut grid.rows {
                 for cell in row.iter_mut() {
-                    cell.needed = super::fit::text_height(&cell.state, &cell.text, cx);
+                    cell.needed =
+                        super::fit::text_height(&cell.state, &cell.text, CELL_LINE_HEIGHT, cx);
                 }
             }
 

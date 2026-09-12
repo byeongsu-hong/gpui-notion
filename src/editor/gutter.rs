@@ -203,10 +203,16 @@ impl NotionEditor {
         if target.index != ix {
             return None;
         }
+        // The row reaches into the gutter and is padded back out of it, and
+        // an absolutely positioned child is placed against the border edge —
+        // so the line starts where the block's own content starts.
+        let indent = self.blocks.get(ix).map(|block| block.indent()).unwrap_or(0);
+        let left = super::style::GUTTER_CONTROLS_WIDTH
+            + super::style::INDENT_WIDTH * indent as f32;
         Some(
             div()
                 .absolute()
-                .left(px(0.))
+                .left(left)
                 .right(px(0.))
                 .when_else(
                     target.below,

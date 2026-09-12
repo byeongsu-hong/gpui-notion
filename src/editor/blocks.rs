@@ -941,6 +941,9 @@ pub struct Table;
 
 /// How wide a column has to be before its text wraps.
 const CELL_MIN_WIDTH: gpui_kit::Pixels = px(120.);
+/// Table text is a step down from the body, with the document's leading.
+const CELL_TEXT_SIZE: gpui_kit::Pixels = px(15.);
+const CELL_LINE_HEIGHT_RATIO: f32 = 1.5;
 
 impl BlockSpec for Table {
     fn type_name(&self) -> &'static str {
@@ -1045,8 +1048,10 @@ fn render_row(
                             .appearance(false)
                             .bordered(false)
                             .h(cell.height(text_height))
-                            .text_size(px(15.))
+                            .text_size(CELL_TEXT_SIZE)
+                            .line_height(relative(CELL_LINE_HEIGHT_RATIO))
                             .font_family(cx.theme().font_family.clone())
+                            .text_color(cx.theme().foreground)
                             .when(header, |this| this.font_weight(FontWeight::SEMIBOLD)),
                     )
                     .into_any_element(),

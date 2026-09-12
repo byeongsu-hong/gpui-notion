@@ -53,12 +53,16 @@ NotionEditor (Entity)            src/editor/view.rs
 └── BlockRegistry (Global)       node types, their rendering and their rules
 ```
 
-Every text area — a block, a table cell — is sized to its own text through
-[`InputFit`](src/editor/fit.rs): the gap between the height an input is handed and
-the height its text area ends up with is *measured* each frame, because that padding
-depends on the component, the theme and the display's device pixels. A text area a
-fraction short of its text scrolls inside itself as the caret moves between rows, and
-the document appears to rattle as it is clicked around.
+Every text area — a block, a table cell — is sized and placed by measurement through
+[`InputFit`](src/editor/fit.rs). Two numbers are learned from each input every frame:
+the **inset**, the height it keeps for itself, and the **lead**, how far from its own
+corner it puts the first glyph. Neither is knowable up front — an input pads itself,
+a code-editor input reserves a line-number gutter even with line numbers off, and the
+text area is snapped to whole device pixels. A text area a fraction short of its text
+scrolls inside itself as the caret moves between rows and the document rattles as it
+is clicked around; an unmeasured lead puts every paragraph a few pixels off the
+markers beside it. The width text wraps at and the line height markers align to are
+read back from the input for the same reason.
 
 Inline formatting is painted by handing the input's decoration layer one
 `HighlightStyle` run per mark run (`view.rs::apply_decorations`); the marks themselves live

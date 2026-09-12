@@ -1781,3 +1781,42 @@ fn typing_to_the_edge_of_the_column_never_leaves_a_block_short(cx: &mut TestAppC
         });
     }
 }
+
+#[gpui_kit::test]
+fn undo_keeps_a_comment_thread_pointing_at_its_block(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("worth discussing", cx);
+    harness.ui(cx, |window, cx| {
+        window.press("secondary-a", cx);
+        window.press("secondary-shift-m", cx);
+        window.input("look at this", cx);
+        window.press("enter", cx);
+    });
+    assert_eq!(
+        cx.update(|cx| harness.editor.read(cx).comment_threads().len()),
+        1,
+        "the comment was not posted"
+    );
+    harness.press("escape", cx);
+    let thread = cx.update(|cx| harness.editor.read(cx).comment_threads()[0].id());
+
+    // A structural change and an undo re-create every block.
+    harness.ui(cx, |window, cx| {
+        window.click(("block", 1usize), cx);
+        window.press("enter", cx);
+    });
+    harness.press("secondary-z", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let kept = editor
+            .comment_thread(thread)
+            .expect("the thread survived the undo");
+        assert_eq!(kept.comments().len(), 1);
+        assert_eq!(
+            editor.index_of(kept.block()),
+            Some(0),
+            "the thread points at a block that is no longer in the document"
+        );
+    });
+}

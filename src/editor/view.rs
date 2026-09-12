@@ -50,6 +50,8 @@ pub struct NotionEditor {
     pub(crate) grids: HashMap<BlockId, super::grid::CellGrid>,
     /// Which cell has the caret, when one does.
     pub(crate) focused_cell: Option<(BlockId, super::grid::CellPosition)>,
+    /// Kept alive so a theme change repaints the marks.
+    theme: Vec<gpui_kit::Subscription>,
     /// Comment threads, and which one is on screen.
     pub(crate) comments: Vec<super::comments::Thread>,
     pub(crate) next_thread_id: u64,
@@ -95,7 +97,13 @@ impl NotionEditor {
             drop_target: None,
             link_editor: None,
             history: super::history::History::default(),
+            theme: Vec::new(),
         };
+        // Mark colours are baked into the decoration layer when they are
+        // applied, so a theme change has to repaint them.
+        this.theme = vec![cx.observe_global::<gpui_kit::component::Theme>(|this, cx| {
+            this.reapply_decorations(cx)
+        })];
         this.insert_block(0, BlockContent::paragraph(""), window, cx);
         this
     }
@@ -259,6 +267,15 @@ impl NotionEditor {
         if self.drop_target.take().is_some() {
             cx.notify();
         }
+    }
+
+    /// Repaint every block's inline marks, after something the colours are
+    /// read from has changed.
+    pub(crate) fn reapply_decorations(&mut self, cx: &mut Context<Self>) {
+        for id in self.blocks.iter().map(|block| block.id).collect::<Vec<_>>() {
+            self.apply_decorations(id, cx);
+        }
+        cx.notify();
     }
 
     /// Re-count the wrapped rows of every block, after the width they wrap
@@ -1020,11 +1037,17 @@ impl NotionEditor {
             // gutter controls, which live in that reach.
             .ml(-style::GUTTER_CONTROLS_WIDTH)
             .pl(style::GUTTER_CONTROLS_WIDTH + style::INDENT_WIDTH * indent as f32)
-            .when(selected, |this| {
-                this.rounded(px(4.)).bg(cx.theme().selection.opacity(0.4))
-            })
             .child(gutter)
-            .child(wrapped)
+            .child(
+                // The tint belongs to the block, not to the gutter the row
+                // reaches into, so it goes on the content rather than the row.
+                div()
+                    .w_full()
+                    .when(selected, |this| {
+                        this.rounded(px(4.)).bg(cx.theme().selection.opacity(0.4))
+                    })
+                    .child(wrapped),
+            )
             .children(indicator)
             .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedBlock>, _, cx| {
                 this.on_drag_over(ix, event, cx)
@@ -1036,6 +1059,10 @@ impl NotionEditor {
     }
 
     /// Where a block sits on screen as of the last frame.
+    ///
+    /// The origin is the block's *content* corner — past the gutter the row
+    /// reaches into and past any indent — while the size is the row's, which
+    /// includes that reach. Consumers here use the origin and the height.
     pub fn block_bounds(&self, id: BlockId) -> Option<Bounds<Pixels>> {
         self.block_bounds.get(&id).copied()
     }

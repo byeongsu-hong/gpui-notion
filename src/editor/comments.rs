@@ -276,6 +276,28 @@ impl NotionEditor {
         cx.notify();
     }
 
+    /// Put the threads of a snapshot back, pointing at the blocks the
+    /// document just got.
+    pub(crate) fn restore_comment_threads(&mut self, threads: &[(usize, Thread)], ids: &[BlockId]) {
+        self.comments = threads
+            .iter()
+            .filter_map(|(ix, thread)| {
+                let mut thread = thread.clone();
+                thread.block = *ids.get(*ix)?;
+                Some(thread)
+            })
+            .collect();
+        self.open_thread = None;
+        self.comment_draft = None;
+        self.next_thread_id = self
+            .comments
+            .iter()
+            .map(|thread| thread.id.0 + 1)
+            .max()
+            .unwrap_or(1)
+            .max(self.next_thread_id);
+    }
+
     /// Drop a thread and its highlight entirely.
     pub fn remove_comment_thread(&mut self, thread: ThreadId, cx: &mut Context<Self>) {
         self.remove_comment_mark(thread, cx);
@@ -333,10 +355,28 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let thread = self
-            .block_at_point(event.position)
-            .and_then(|id| self.thread_at_offset(id, cx));
+        // The input moves its own caret while handling this press, so the
+        // answer is only true a frame later.
+        let Some(block) = self.block_at_point(event.position) else {
+            if self.open_thread.is_some() {
+                self.close_comment_popover(window, cx);
+            }
+            return;
+        };
+        let editor = cx.entity();
+        window.defer(cx, move |window, cx| {
+            editor.update(cx, |this, cx| this.settle_thread_under_caret(block, window, cx));
+        });
+    }
 
+    /// Open the thread the caret ended up in, or close the one on screen.
+    fn settle_thread_under_caret(
+        &mut self,
+        block: BlockId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let thread = self.thread_at_offset(block, cx);
         match thread {
             Some(thread) if self.open_thread != Some(thread) => {
                 self.open_comment_thread(thread, window, cx)

@@ -22,6 +22,9 @@ pub struct Snapshot {
     blocks: Vec<BlockContent>,
     /// Block index and byte offset of the caret when the step was taken.
     caret: Option<(usize, usize)>,
+    /// Comment threads, keyed by block *index*: restoring mints new block
+    /// ids, so a thread that named a block by id would be orphaned.
+    threads: Vec<(usize, super::comments::Thread)>,
 }
 
 /// Why a step is being recorded, which decides whether it joins the last one.
@@ -80,9 +83,15 @@ impl NotionEditor {
             let ix = self.index_of(id)?;
             Some((ix, self.blocks[ix].state.read(cx).cursor()))
         });
+        let threads = self
+            .comment_threads()
+            .iter()
+            .filter_map(|thread| Some((self.index_of(thread.block())?, thread.clone())))
+            .collect();
         Snapshot {
             blocks: self.content(),
             caret,
+            threads,
         }
     }
 
@@ -117,6 +126,8 @@ impl NotionEditor {
         for (ix, content) in snapshot.blocks.into_iter().enumerate() {
             ids.push(self.insert_block(ix, content, window, cx));
         }
+
+        self.restore_comment_threads(&snapshot.threads, &ids);
 
         if let Some((ix, offset)) = snapshot.caret
             && let Some(id) = ids.get(ix).copied()

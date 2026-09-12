@@ -38,7 +38,9 @@ pub fn popover_surface(cx: &App) -> Div {
         .text_color(cx.theme().popover_foreground)
         .border_1()
         .border_color(cx.theme().border)
-        .rounded(px(12.))
+        // The theme owns the corner, so this surface matches the menus and
+        // popovers gpui-kit draws beside it.
+        .rounded(cx.theme().radius)
         .shadow_lg()
         .p(px(4.))
 }

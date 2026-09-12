@@ -148,9 +148,14 @@ pub fn reset_scroll_when_text_fits(
 
 /// Height of the text in a single-input text area, in pixels, as the input
 /// itself lays it out: at least one row, more when it wraps.
-pub fn text_height(state: &Entity<EditorState>, text: &str, cx: &App) -> Pixels {
+pub fn text_height(
+    state: &Entity<EditorState>,
+    text: &str,
+    fallback_line_height: Pixels,
+    cx: &App,
+) -> Pixels {
     let state = state.read(cx);
-    let line_height = state.line_height().unwrap_or(px(20.));
+    let line_height = state.line_height().unwrap_or(fallback_line_height);
     state
         .range_to_bounds(&(0..text.len()))
         .map(|bounds| bounds.size.height)
