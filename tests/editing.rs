@@ -757,3 +757,24 @@ fn the_emoji_entry_of_the_slash_menu_opens_the_emoji_menu(cx: &mut TestAppContex
     harness.press("enter", cx);
     assert_eq!(harness.texts(cx), vec!["🚀"]);
 }
+
+#[gpui_kit::test]
+fn an_image_block_takes_a_dropped_file(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/image", cx);
+    harness.press("enter", cx);
+    assert_eq!(harness.types(cx)[0], types::IMAGE);
+
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0)).unwrap();
+    cx.update(|cx| {
+        harness.editor.clone().update(cx, |editor, cx| {
+            editor.set_image_source(id, std::path::PathBuf::from("/tmp/picture.png"), cx)
+        })
+    });
+
+    cx.update(|cx| {
+        let block = &harness.editor.read(cx).content()[0];
+        assert_eq!(block.attrs.src.as_deref(), Some("/tmp/picture.png"));
+        assert_eq!(block.attrs.alt.as_deref(), Some("picture.png"));
+    });
+}

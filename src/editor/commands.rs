@@ -665,6 +665,46 @@ impl NotionEditor {
         self.set_block_text(ix, text, caret, window, cx);
     }
 
+    /// Ask the platform for an image file and put it in the block.
+    pub fn pick_image(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Choose image".into()),
+        });
+
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| this.set_image_source(id, path, cx));
+        })
+        .detach();
+    }
+
+    /// Point an image block at a file on disk.
+    pub fn set_image_source(
+        &mut self,
+        id: BlockId,
+        path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.index_of(id) else { return };
+        self.record(Step::Structural, cx);
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.blocks[ix].attrs.src = Some(path.to_string_lossy().to_string().into());
+        self.blocks[ix].attrs.alt = Some(name.into());
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
     /// Set the language a code block is highlighted with.
     pub fn set_code_language(
         &mut self,

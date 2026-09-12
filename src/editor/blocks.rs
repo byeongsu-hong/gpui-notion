@@ -713,27 +713,54 @@ impl BlockSpec for Image {
     }
 
     fn render_body(&self, ctx: &BlockContext, _: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        let id = ctx.id;
+        let editor = ctx.editor.clone();
+        let selected = ctx.selected;
+
         let Some(src) = ctx.attrs.src.clone() else {
+            let dropped = editor.clone();
             return Some(
                 div()
+                    .id(("image-drop", id.0 as usize))
                     .w_full()
                     .h(px(120.))
                     .rounded(px(6.))
                     .border_1()
                     .border_dashed()
-                    .border_color(cx.theme().border)
+                    .border_color(if selected {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().border
+                    })
                     .flex()
                     .items_center()
                     .justify_center()
+                    .gap(px(6.))
+                    .cursor_pointer()
+                    .hover(|this| this.bg(cx.theme().muted.opacity(0.4)))
                     .text_color(cx.theme().muted_foreground)
+                    .child(super::ui::icon("image-up", px(18.), cx.theme().muted_foreground))
                     .child("Click to upload or drag and drop")
+                    .on_click(move |_, window, cx| {
+                        let _ = editor.update(cx, |editor, cx| editor.pick_image(id, window, cx));
+                    })
+                    .on_drop(move |paths: &gpui_kit::ExternalPaths, _window, cx| {
+                        let Some(path) = paths.paths().first().cloned() else {
+                            return;
+                        };
+                        let _ =
+                            dropped.update(cx, |editor, cx| editor.set_image_source(id, path, cx));
+                    })
                     .into_any_element(),
             );
         };
         Some(
             div()
                 .w_full()
-                .child(img(src).w_full().rounded(px(6.)))
+                .when(selected, |this| {
+                    this.border_2().border_color(cx.theme().primary)
+                })
+                .child(img(src.to_string()).w_full().rounded(px(6.)))
                 .into_any_element(),
         )
     }

@@ -197,6 +197,11 @@ impl NotionEditor {
             .is_some_and(|block| block.ty == types::PARAGRAPH && block.text.is_empty())
     }
 
+    /// Id of the block at `ix`, for tests and hosts.
+    pub fn block_id_at(&self, ix: usize) -> Option<BlockId> {
+        self.blocks.get(ix).map(|block| block.id)
+    }
+
     /// Focus handle of the block at `ix`, for tests and hosts.
     pub fn block_focus_handle(&self, ix: usize, cx: &App) -> Option<FocusHandle> {
         use gpui_kit::Focusable as _;

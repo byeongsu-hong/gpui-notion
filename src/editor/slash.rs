@@ -344,6 +344,16 @@ impl NotionEditor {
         let mut group = "";
         for (index, item) in items.iter().enumerate() {
             if item.group() != group {
+                if !group.is_empty() {
+                    rows.push(
+                        div()
+                            .h(px(1.))
+                            .my(px(4.))
+                            .mx(px(4.))
+                            .bg(cx.theme().border)
+                            .into_any_element(),
+                    );
+                }
                 group = item.group();
                 rows.push(
                     div()
