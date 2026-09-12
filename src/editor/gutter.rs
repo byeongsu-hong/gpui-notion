@@ -4,6 +4,7 @@
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu};
 use gpui_kit::component::{ActiveTheme, Sizable as _};
+
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, DragMoveEvent, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -96,24 +97,21 @@ impl NotionEditor {
                     })),
             )
             .child(
-                div()
-                    .id(("drag", id.0 as usize))
-                    .on_drag(DraggedBlock { id }, move |_, _, _, cx| {
-                        cx.new(|_| DragPreview { text: text.clone() })
-                    })
-                    .child(
-                        Button::new(("grip", id.0 as usize))
-                            .ghost()
-                            .xsmall()
-                            .icon(Lucide("grip-vertical"))
-                            .tooltip("Click for options, hold for drag")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_block_as_node(id, window, cx)
-                            }))
-                            .dropdown_menu(move |menu, window, cx| {
-                                block_menu(id, label.clone(), focus.clone(), menu, window, cx)
-                            }),
-                    ),
+                draggable(
+                    Button::new(("drag", id.0 as usize))
+                        .ghost()
+                        .xsmall()
+                        .icon(Lucide("grip-vertical"))
+                        .tooltip("Click for options, hold for drag")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.select_block_as_node(id, window, cx)
+                        })),
+                    id,
+                    text,
+                )
+                .dropdown_menu(move |menu, window, cx| {
+                    block_menu(id, label.clone(), focus.clone(), menu, window, cx)
+                }),
             )
             .into_any_element()
     }
@@ -146,8 +144,14 @@ impl NotionEditor {
         event: &DragMoveEvent<DraggedBlock>,
         cx: &mut Context<Self>,
     ) {
+        // The listener fires on every block that has one, so the pointer
+        // position decides which row is actually being dragged over.
         let bounds = event.bounds;
-        let below = event.event.position.y > bounds.center().y;
+        let position = event.event.position;
+        if !bounds.contains(&position) {
+            return;
+        }
+        let below = position.y > bounds.center().y;
         let target = DropTarget { index: ix, below };
         if self.drop_target != Some(target) {
             self.drop_target = Some(target);
@@ -240,4 +244,16 @@ fn block_menu(
         .menu("Move down", Box::new(actions::MoveBlockDown))
         .separator()
         .menu("Delete", Box::new(actions::DeleteBlock))
+}
+
+/// Give the drag handle its drag, through the imperative `Interactivity` API:
+/// the styled `Button` is interactive but not stateful-interactive, so the
+/// builder-style `on_drag` is not available on it.
+fn draggable(mut button: Button, id: BlockId, text: String) -> Button {
+    button
+        .interactivity()
+        .on_drag(DraggedBlock { id }, move |_, _, _, cx| {
+            cx.new(|_| DragPreview { text: text.clone() })
+        });
+    button
 }

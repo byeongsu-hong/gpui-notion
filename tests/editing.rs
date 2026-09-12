@@ -565,3 +565,27 @@ fn select_all_escalates_from_block_to_document(cx: &mut TestAppContext) {
         2
     );
 }
+
+#[gpui_kit::test]
+fn dragging_the_handle_reorders_blocks(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("enter", cx);
+    harness.type_text("three", cx);
+    assert_eq!(harness.texts(cx), vec!["one", "two", "three"]);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", 1usize), cx);
+        window.render_frame(cx);
+        window.drag_to(("drag", 1usize), ("block", 3usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    // The pointer ends on the upper half of the third block, so the dragged
+    // block lands above it.
+    assert_eq!(harness.texts(cx), vec!["two", "one", "three"]);
+}
