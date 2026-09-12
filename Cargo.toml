@@ -3,6 +3,11 @@ name = "gpui-notion"
 version = "0.1.0"
 edition = "2024"
 publish = false
+description = "A Notion-like block editor for GPUI, with Tiptap's Notion-like editor template as its feature surface"
+license = "MIT"
+repository = "https://github.com/orthory/gpui-notion"
+keywords = ["gpui", "editor", "notion", "tiptap", "rich-text"]
+categories = ["gui", "text-editors"]
 
 [lib]
 name = "gpui_notion"

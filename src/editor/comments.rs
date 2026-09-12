@@ -523,13 +523,13 @@ impl NotionEditor {
             .find(|mark| mark.kind == kind)
             .map(|mark| mark.range.clone());
 
-        if let Some(range) = range {
-            if let Some(bounds) = self.blocks[ix].state.read(cx).range_to_bounds(&range) {
-                return Some(
-                    bounds.origin
-                        + Point::new(px(0.), bounds.size.height + cx.editor_theme().rems(0.375)),
-                );
-            }
+        if let Some(range) = range
+            && let Some(bounds) = self.blocks[ix].state.read(cx).range_to_bounds(&range)
+        {
+            return Some(
+                bounds.origin
+                    + Point::new(px(0.), bounds.size.height + cx.editor_theme().rems(0.375)),
+            );
         }
         let bounds = self.block_bounds(thread.block)?;
         let origin = self

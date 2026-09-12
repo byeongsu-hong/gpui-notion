@@ -142,6 +142,10 @@ const CELLS_ATTRIBUTE: &str = "cells";
 const DEFAULT_ROWS: usize = 3;
 const DEFAULT_COLUMNS: usize = 3;
 
+/// What a cell carries across a rebuild: its input, its text, the height its
+/// text needs and what its input keeps for itself.
+type CellState = (Entity<EditorState>, String, Pixels, InputFit);
+
 impl NotionEditor {
     /// The grid beside a block, if it has one.
     pub fn grid(&self, block: BlockId) -> Option<&CellGrid> {
@@ -526,7 +530,7 @@ impl NotionEditor {
         let Some(grid) = self.grids.get(&block) else {
             return;
         };
-        let states: Vec<Vec<(Entity<EditorState>, String, Pixels, InputFit)>> = grid
+        let states: Vec<Vec<CellState>> = grid
             .rows
             .iter()
             .map(|row| {

@@ -361,9 +361,13 @@ impl<T: 'static> ActiveEditorTheme for gpui_kit::Context<'_, T> {
     }
 }
 
+/// What an application hands [`EditorTheme::customize`]: the freshly derived
+/// tokens to change, and the framework theme they came from.
+type Customization = Rc<dyn Fn(&mut EditorTheme, &Theme)>;
+
 struct EditorThemeGlobal {
     tokens: Rc<EditorTheme>,
-    customize: Option<Rc<dyn Fn(&mut EditorTheme, &Theme)>>,
+    customize: Option<Customization>,
 }
 
 impl Global for EditorThemeGlobal {}

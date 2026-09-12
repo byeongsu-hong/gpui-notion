@@ -9,6 +9,15 @@ cargo run            # the demo document
 cargo test           # unit tests + UI integration tests
 ```
 
+Requires a Rust toolchain with the 2024 edition and, on Linux, the libraries GPUI
+draws and talks to the compositor with:
+
+```bash
+sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
+  libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
+  vulkan-validationlayers libvulkan1
+```
+
 ## What it does
 
 - **Blocks**: paragraph, heading 1–3, bullet / numbered / to-do lists (nested), blockquote,
@@ -219,3 +228,7 @@ switching (real superscript baselines, monospace inline code) is unavailable, an
 multi-line inputs do not support per-block text alignment. Table cells hold plain text (no
 marks, no column resizing or merging), and image blocks take a picked or dropped file but
 have no upload progress, size limits or captions.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

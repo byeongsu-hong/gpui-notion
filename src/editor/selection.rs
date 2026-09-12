@@ -244,12 +244,12 @@ impl NotionEditor {
                 .copied()
                 .or(self.focused)
                 .and_then(|anchor| self.index_of(anchor));
-            if let (Some(from), Some(to)) = (from, self.index_of(id)) {
-                if from != to {
-                    self.select_block_range(from, to, window, cx);
-                    cx.stop_propagation();
-                    return;
-                }
+            if let (Some(from), Some(to)) = (from, self.index_of(id))
+                && from != to
+            {
+                self.select_block_range(from, to, window, cx);
+                cx.stop_propagation();
+                return;
             }
         }
 

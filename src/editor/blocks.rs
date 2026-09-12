@@ -1065,7 +1065,7 @@ fn render_row(
         .h(row_height)
         .items_stretch()
         .when(header, |this| this.bg(ctx.theme.table_header_background))
-        .when(row + 1 <= grid.rows(), |this| {
+        .when(row < grid.rows(), |this| {
             this.border_b_1().border_color(cx.theme().border)
         })
         .children(cells)

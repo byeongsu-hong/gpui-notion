@@ -744,8 +744,10 @@ impl NotionEditor {
     /// Whether a block is shown, i.e. no collapsed toggle encloses it.
     pub(crate) fn is_visible(&self, ix: usize) -> bool {
         let indent = self.blocks[ix].indent;
-        self.blocks[..ix].iter().rev().any(|b| b.indent < indent && b.attrs.collapsed)
-            == false
+        !self.blocks[..ix]
+            .iter()
+            .rev()
+            .any(|block| block.indent < indent && block.attrs.collapsed)
     }
 
     pub fn toggle_collapsed(&mut self, id: BlockId, cx: &mut Context<Self>) {
