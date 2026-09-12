@@ -223,15 +223,7 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Cell {
-        let state = cx.new(|cx| {
-            EditorState::new(window, cx)
-                .line_number(false)
-                .folding(false)
-                .indent_guides(false)
-                .searchable(false)
-                .scroll_beyond_last_line(None)
-                .soft_wrap(true)
-        });
+        let state = cx.new(|cx| super::fit::document_text_state(window, cx));
         let subscription = cx.subscribe_in(&state, window, move |this: &mut Self, state, event, _window, cx| {
             if matches!(event, InputEvent::Change) {
                 let text = state.read(cx).value().to_string();

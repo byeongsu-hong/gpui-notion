@@ -1470,3 +1470,44 @@ fn a_table_in_a_loaded_document_comes_back_with_its_cells(cx: &mut TestAppContex
         );
     });
 }
+
+#[gpui_kit::test]
+fn a_table_cell_has_nothing_to_scroll(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("/table", cx);
+    harness.press("enter", cx);
+    harness.type_text("Name", cx);
+    let id = cx.update(|cx| harness.editor.read(cx).block_id_at(0).unwrap());
+
+    // Asking a cell to scroll a long way is clamped to whatever room it has
+    // below its last line, which for a cell sized to its text is none.
+    let states: Vec<_> = cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        let grid = editor.grid(id).unwrap();
+        grid.positions()
+            .map(|at| (at, grid.cell(at).unwrap().state().clone()))
+            .collect()
+    });
+    cx.update_window(harness.window, |_, window, cx| {
+        for (_, state) in &states {
+            state.update(cx, |state, cx| {
+                state.set_scroll_offset(gpui_kit::point(px(0.), px(-500.)), cx)
+            });
+        }
+        window.render_frame(cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for (at, _) in &states {
+            assert_eq!(
+                editor.cell_scroll_offset(id, *at, cx),
+                Some(0.),
+                "cell {at:?} had room to scroll"
+            );
+        }
+    });
+}

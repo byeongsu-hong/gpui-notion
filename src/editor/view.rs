@@ -319,15 +319,9 @@ impl NotionEditor {
         let text = text.to_string();
 
         cx.new(|cx| {
-            EditorState::new(window, cx)
-                .line_number(false)
-                .folding(false)
-                .indent_guides(false)
+            super::fit::document_text_state(window, cx)
                 .auto_close(caps.multiline)
                 .smart_indent(caps.multiline)
-                .soft_wrap(true)
-                .searchable(false)
-                .scroll_beyond_last_line(Some(0))
                 .language(language)
                 .placeholder(placeholder)
                 .default_value(text)

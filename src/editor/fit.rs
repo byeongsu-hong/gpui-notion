@@ -13,9 +13,26 @@
 //! height it was given last frame and asks for more when it came up short.
 
 use gpui_kit::component::input::EditorState;
-use gpui_kit::{App, Entity, Pixels, px};
+use gpui_kit::{App, Context, Entity, Pixels, Window, px};
 
 use super::style;
+
+/// A text area whose height the document decides.
+///
+/// Every input in the editor starts here, so none of them can drift into
+/// scrolling on its own: no line numbers, no folding, no search, soft wrap
+/// on, and — the part that matters — no empty room reserved below the last
+/// line. A code editor reserves half a viewport there by default, which makes
+/// content taller than the box and puts a scrollbar in a one-line table cell.
+pub fn document_text_state(window: &mut Window, cx: &mut Context<EditorState>) -> EditorState {
+    EditorState::new(window, cx)
+        .line_number(false)
+        .folding(false)
+        .indent_guides(false)
+        .searchable(false)
+        .scroll_beyond_last_line(Some(0))
+        .soft_wrap(true)
+}
 
 /// What one input keeps for itself, learned from what it did last frame.
 #[derive(Clone, Copy, Debug, PartialEq)]

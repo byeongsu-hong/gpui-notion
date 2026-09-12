@@ -986,6 +986,7 @@ impl BlockSpec for Table {
         Some(
             h_flex()
                 .id(("table", id.0 as usize))
+                .test_support()
                 .items_start()
                 .gap(px(2.))
                 .child(
