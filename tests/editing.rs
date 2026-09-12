@@ -1752,3 +1752,32 @@ fn deleting_a_table_takes_its_cells_with_it(cx: &mut TestAppContext) {
         );
     });
 }
+
+
+#[gpui_kit::test]
+fn typing_to_the_edge_of_the_column_never_leaves_a_block_short(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    // Type a word at a time up to and past the wrap point, checking after
+    // every word that the block still holds its text without scrolling.
+    for word in [
+        "typing", "prose", "that", "keeps", "going", "until", "it", "reaches", "the", "right",
+        "hand", "edge", "of", "the", "column", "and", "then", "wraps", "onto", "another", "row",
+        "and", "keeps", "going", "again",
+    ] {
+        harness.type_text(word, cx);
+        harness.type_text(" ", cx);
+        cx.update(|cx| {
+            let editor = harness.editor.read(cx);
+            let id = editor.block_id_at(0).unwrap();
+            assert!(
+                editor.text_area_fits_text(id, cx),
+                "the block came up short after {word:?}"
+            );
+            assert_eq!(
+                editor.block_scroll_offset(id, cx).map(|p| f32::from(p.y)),
+                Some(0.),
+                "the block scrolled after {word:?}"
+            );
+        });
+    }
+}

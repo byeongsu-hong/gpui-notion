@@ -35,15 +35,22 @@ pub fn document_text_state(window: &mut Window, cx: &mut Context<EditorState>) -
 }
 
 /// What one input keeps for itself, learned from what it did last frame.
+///
+/// `inset` is the height it takes out of the box; `lead` is how far its first
+/// glyph sits from the box's own corner. Both are measured: an input pads
+/// itself, and a code editor reserves a line-number gutter even with line
+/// numbers off, neither of which an application can know.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InputFit {
     inset: Pixels,
+    lead: gpui_kit::Point<Pixels>,
 }
 
 impl Default for InputFit {
     fn default() -> Self {
         Self {
             inset: style::INPUT_PAD_Y * 2.,
+            lead: gpui_kit::point(style::INPUT_PAD_X, style::INPUT_PAD_Y),
         }
     }
 }
@@ -58,6 +65,29 @@ impl InputFit {
     /// a gap under the text and can come off a neighbouring margin.
     pub fn surplus(&self) -> Pixels {
         (self.inset - style::INPUT_PAD_Y * 2.).max(px(0.))
+    }
+
+    /// The height this input takes out of the box it is given.
+    pub fn inset(&self) -> Pixels {
+        self.inset
+    }
+
+    /// How far to pull an input's box back so its first glyph lands on the
+    /// spot the layout gave the block.
+    pub fn lead(&self) -> gpui_kit::Point<Pixels> {
+        self.lead
+    }
+
+    /// Learn where the input actually put its first glyph: `slot` is the
+    /// corner the layout handed the block, `glyph` is where the text starts.
+    pub fn observe_lead(&mut self, slot: gpui_kit::Point<Pixels>, glyph: gpui_kit::Point<Pixels>) {
+        let error = glyph - slot;
+        if error.x.abs() > px(0.05) {
+            self.lead.x = (self.lead.x + error.x).clamp(px(0.), style::MAX_INPUT_INSET);
+        }
+        if error.y.abs() > px(0.05) {
+            self.lead.y = (self.lead.y + error.y).clamp(px(0.), style::MAX_INPUT_INSET);
+        }
     }
 
     /// Learn from the text area an input ended up with.

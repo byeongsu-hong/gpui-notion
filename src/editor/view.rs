@@ -44,6 +44,8 @@ pub struct NotionEditor {
     pub(crate) block_bounds: HashMap<BlockId, Bounds<Pixels>>,
     /// The block a press started in, which anchors a drag selection.
     pub(crate) mouse_anchor: Option<BlockId>,
+    /// Where each block's text was given room to start, refreshed per frame.
+    pub(crate) text_slots: HashMap<BlockId, gpui_kit::Point<Pixels>>,
     /// Child text areas of blocks that hold a grid, keyed by block.
     pub(crate) grids: HashMap<BlockId, super::grid::CellGrid>,
     /// Which cell has the caret, when one does.
@@ -78,6 +80,7 @@ impl NotionEditor {
             focused: None,
             always_show_gutter: false,
             block_bounds: HashMap::new(),
+            text_slots: HashMap::new(),
             mouse_anchor: None,
             grids: HashMap::new(),
             focused_cell: None,
@@ -289,6 +292,21 @@ impl NotionEditor {
             .range_to_bounds(&(0..0))
             .map(|bounds| bounds.origin)
             .or_else(|| state.text_bounds().map(|bounds| bounds.origin))
+    }
+
+    /// Review aid: the input's own box and where it puts the first glyph.
+    pub fn input_geometry(&self, id: BlockId, cx: &App) -> Option<(f32, f32, f32, f32, f32, f32)> {
+        let state = self.block(id)?.state.read(cx);
+        let area = state.text_bounds()?;
+        let glyph = state.range_to_bounds(&(0..0))?.origin;
+        Some((
+            f32::from(area.origin.x),
+            f32::from(area.origin.y),
+            f32::from(area.size.width),
+            f32::from(area.size.height),
+            f32::from(glyph.x),
+            f32::from(glyph.y),
+        ))
     }
 
     /// Whether a block's text area is at least as tall as the text in it.
@@ -751,14 +769,16 @@ impl NotionEditor {
 
     fn measure_rows(&self, ix: usize, layout: &BlockLayout, cx: &App) -> usize {
         let block = &self.blocks[ix];
-        // The width text wraps at is the one the input ended up with; the
-        // arithmetic below is only the guess for a block that has not laid
-        // out yet.
+        // The width text wraps at is narrower than the text area: the input
+        // keeps a gutter on the left — the distance measured into the fit's
+        // lead — and the same margin again on the right. The arithmetic in
+        // the fallback is only the guess for a block that has not laid out.
+        let lead = block.fit.lead().x;
         let wrap_width = block
             .state
             .read(cx)
             .text_bounds()
-            .map(|bounds| bounds.size.width)
+            .map(|bounds| bounds.size.width - lead * 2.)
             .filter(|width| *width > px(1.))
             .unwrap_or_else(|| {
                 self.wrap_width
@@ -822,6 +842,16 @@ impl NotionEditor {
             if let Some(area) = area {
                 self.blocks[ix].fit.observe(needed, area);
             }
+            let glyph = self.blocks[ix]
+                .state
+                .read(cx)
+                .range_to_bounds(&(0..0))
+                .map(|bounds| bounds.origin);
+            let slot = self.text_slots.get(&self.blocks[ix].id).copied();
+            if let (Some(slot), Some(glyph)) = (slot, glyph) {
+                self.blocks[ix].fit.observe_lead(slot, glyph);
+            }
+
             let state = self.blocks[ix].state.clone();
             super::fit::reset_scroll_when_text_fits(&state, needed, cx);
         }
@@ -874,24 +904,54 @@ impl NotionEditor {
         let mut color = cx.theme().foreground;
         color.a *= layout.text_opacity;
 
-        // The input pads its own text area; the negative margins put the
-        // first glyph exactly on the block's content edge, where the markers
-        // and every other block element are.
-        div()
-            .mx(-style::INPUT_PAD_X)
-            .my(-style::INPUT_PAD_Y)
+        // An input insets its own text, so the block pulls the box back by
+        // however much that turned out to be, and its first glyph lands on
+        // the corner the layout gave it — beside the marker, inside the quote
+        // bar, level with the block above.
+        let lead = block.fit.lead();
+        h_flex()
+            .w_full()
+            .items_start()
+            .child(self.slot_probe(block.id, cx))
             .child(
-                Editor::new(&block.state)
-                    .appearance(false)
-                    .bordered(false)
-                    .h(height)
-                    .font_family(family)
-                    .text_size(layout.text_size)
-                    .font_weight(layout.font_weight)
-                    .line_height(relative(layout.line_height))
-                    .text_color(color),
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .ml(-lead.x)
+                    .mt(-lead.y)
+                    .mb(-(block.fit.inset() - lead.y))
+                    .child(
+                        Editor::new(&block.state)
+                            .appearance(false)
+                            .bordered(false)
+                            .h(height)
+                            .font_family(family)
+                            .text_size(layout.text_size)
+                            .font_weight(layout.font_weight)
+                            .line_height(relative(layout.line_height))
+                            .text_color(color),
+                    ),
             )
             .into_any_element()
+    }
+
+    /// A zero-sized element at the corner the layout gave the block, so the
+    /// distance from there to the first glyph can be measured rather than
+    /// assumed.
+    fn slot_probe(&self, id: BlockId, cx: &mut Context<Self>) -> AnyElement {
+        let editor = cx.entity().downgrade();
+        canvas(
+            move |bounds, _window, cx| {
+                let _ = editor.update(cx, |this, _| {
+                    this.text_slots.insert(id, bounds.origin);
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .w(px(0.))
+        .h(px(0.))
+        .flex_none()
+        .into_any_element()
     }
 
     fn render_block(&self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
