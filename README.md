@@ -1,5 +1,7 @@
 # gpui-notion
 
+[![CI](https://github.com/orthory/gpui-notion/actions/workflows/ci.yml/badge.svg)](https://github.com/orthory/gpui-notion/actions/workflows/ci.yml)
+
 A Notion-like block editor written in Rust on [GPUI](https://www.gpui.rs) through
 [`gpui-kit`](https://github.com/longbridge/gpui-kit), with the feature surface and command
 names of Tiptap's [Notion-like editor template](https://tiptap.dev/docs/ui-components/templates/notion-like-editor).
