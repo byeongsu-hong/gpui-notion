@@ -73,6 +73,7 @@ impl NotionEditor {
             .capture_action(cx.listener(Self::on_select_up))
             .capture_action(cx.listener(Self::on_select_down))
             .capture_action(cx.listener(Self::on_select_all))
+            .on_key_down(cx.listener(Self::on_typing_over_blocks))
             .capture_action(cx.listener(Self::on_copy))
             .capture_action(cx.listener(Self::on_cut))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
@@ -393,6 +394,44 @@ impl NotionEditor {
         if self.lift_list_item(window, cx) {
             cx.stop_propagation();
         }
+    }
+
+    /// Typing with whole blocks selected replaces them, the way it does in a
+    /// word processor and in Notion.
+    fn on_typing_over_blocks(
+        &mut self,
+        event: &gpui_kit::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.has_block_selection() {
+            return;
+        }
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
+            return;
+        }
+        let Some(text) = event.keystroke.key_char.clone() else {
+            return;
+        };
+        if text.is_empty() || text.chars().any(char::is_control) {
+            return;
+        }
+
+        let at = self.selected_indexes().first().copied().unwrap_or(0);
+        self.delete_selected_blocks(window, cx);
+        let at = at.min(self.blocks.len());
+        // Deleting everything already leaves an empty paragraph behind; the
+        // typed character belongs in that one rather than in a second.
+        let id = match self.block_is_empty_paragraph(at) {
+            true => self.block_id_at(at).expect("checked above"),
+            false => self.insert_block(at, super::block::BlockContent::paragraph(""), window, cx),
+        };
+        self.focus_block(id, Caret::Start, window, cx);
+        if let Some(ix) = self.index_of(id) {
+            self.edit_block_text(ix, 0..0, &text, Some(text.len()), window, cx);
+        }
+        cx.stop_propagation();
     }
 
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {

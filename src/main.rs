@@ -56,8 +56,13 @@ fn demo_document() -> Vec<BlockContent> {
 /// window with that surface open, so it can be reviewed without driving the
 /// pointer.
 fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Context<NotionEditor>) {
+    if std::env::var("NOTION_DEMO").is_ok() {
+        window.activate_window();
+    }
     match std::env::var("NOTION_DEMO").as_deref() {
         Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
+        Ok("focus") => editor.select_text_in_block(3, 5..5, window, cx),
+        Ok("gutter") => editor.show_gutter_always(),
         Ok("slash") => {
             editor.focus_last_block(window, cx);
             editor.open_slash_menu(window, cx);

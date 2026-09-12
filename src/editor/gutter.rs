@@ -74,16 +74,21 @@ impl NotionEditor {
         // Centre the controls on the block's first line.
         let top = (layout.line_height_px() - px(24.)).max(px(0.)) / 2.;
 
-        div()
+        let mut controls = div()
             .absolute()
             .left(px(4.))
             .top(top)
             .h(px(24.))
             .flex()
             .items_center()
-            .gap(px(2.))
-            .invisible()
-            .group_hover(group_name(id), |this| this.visible())
+            .gap(px(2.));
+        if !self.always_show_gutter {
+            controls = controls
+                .invisible()
+                .group_hover(group_name(id), |this| this.visible());
+        }
+
+        controls
             .child(
                 Button::new(("insert", id.0 as usize))
                     .ghost()

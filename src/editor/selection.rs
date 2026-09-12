@@ -6,10 +6,14 @@
 
 use gpui_kit::base::actions::{SelectDown, SelectUp};
 use gpui_kit::component::input::{Copy, Cut, SelectAll};
-use gpui_kit::{ClipboardItem, Context, Window};
+use gpui_kit::{
+    ClipboardItem, Context, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, Window,
+};
 
 use super::block::{BlockContent, BlockId, BlockRegistry, types};
 use super::history::Step;
+use super::style;
 use super::view::{Caret, NotionEditor};
 
 impl NotionEditor {
@@ -164,7 +168,131 @@ impl NotionEditor {
         cx.write_to_clipboard(ClipboardItem::new_string(markdown));
     }
 
+    /// The block under a pointer position: the one it is inside, else the
+    /// nearest one above or below, so a drag into the margins still lands.
+    pub(crate) fn block_at_point(&self, position: Point<Pixels>) -> Option<BlockId> {
+        let mut nearest: Option<(Pixels, BlockId)> = None;
+        for block in &self.blocks {
+            let Some(bounds) = self.block_bounds.get(&block.id) else {
+                continue;
+            };
+            if position.y >= bounds.top() && position.y < bounds.bottom() {
+                return Some(block.id);
+            }
+            let distance = if position.y < bounds.top() {
+                bounds.top() - position.y
+            } else {
+                position.y - bounds.bottom()
+            };
+            if nearest.is_none_or(|(best, _)| distance < best) {
+                nearest = Some((distance, block.id));
+            }
+        }
+        nearest.map(|(_, id)| id)
+    }
+
+    /// Whether a press at this position was aimed at the block's text rather
+    /// than at the gutter controls, which run their own drag.
+    fn press_is_on_text(&self, id: BlockId, position: Point<Pixels>) -> bool {
+        self.block_bounds
+            .get(&id)
+            .is_some_and(|bounds| position.x >= bounds.left() + style::GUTTER_CONTROLS_WIDTH)
+    }
+
     // ------------------------------------------------------------- handlers
+
+    /// A press anchors a drag selection, and with Shift extends the current
+    /// one to the pressed block the way Notion does.
+    pub(crate) fn on_page_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+        let Some(id) = self.block_at_point(event.position) else {
+            self.mouse_anchor = None;
+            return;
+        };
+        if !self.press_is_on_text(id, event.position) {
+            self.mouse_anchor = None;
+            return;
+        }
+
+        if event.modifiers.shift {
+            let from = self
+                .selected_blocks()
+                .first()
+                .copied()
+                .or(self.focused)
+                .and_then(|anchor| self.index_of(anchor));
+            if let (Some(from), Some(to)) = (from, self.index_of(id)) {
+                if from != to {
+                    self.select_block_range(from, to, window, cx);
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        }
+
+        self.mouse_anchor = Some(id);
+        self.clear_block_selection(cx);
+    }
+
+    /// Dragging out of the block the press started in turns the drag into a
+    /// block selection, which is what Notion switches to at the same point.
+    pub(crate) fn on_page_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.pressed_button != Some(MouseButton::Left) || cx.has_active_drag() {
+            return;
+        }
+        let Some(anchor) = self.mouse_anchor else {
+            return;
+        };
+        let Some(over) = self.block_at_point(event.position) else {
+            return;
+        };
+        let (Some(from), Some(to)) = (self.index_of(anchor), self.index_of(over)) else {
+            return;
+        };
+
+        if from == to {
+            // Back inside the block it started in: the input's own text
+            // selection takes over again.
+            if self.has_block_selection() {
+                self.clear_block_selection(cx);
+                self.focus_block(anchor, Caret::At(0), window, cx);
+            }
+            return;
+        }
+
+        let wanted: Vec<BlockId> = self.blocks[from.min(to)..=from.max(to)]
+            .iter()
+            .map(|block| block.id)
+            .collect();
+        if self.selected != wanted {
+            self.select_block_range(from, to, window, cx);
+        }
+        // The block the drag started in is shown whole, like the rest.
+        let len = self.blocks[from].text.len();
+        let state = self.blocks[from].state.clone();
+        state.update(cx, |state, cx| state.set_selected_range(0..len, cx));
+    }
+
+    pub(crate) fn on_page_mouse_up(
+        &mut self,
+        _: &MouseUpEvent,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        self.mouse_anchor = None;
+    }
 
     pub(crate) fn on_select_up(&mut self, _: &SelectUp, window: &mut Window, cx: &mut Context<Self>) {
         if self.has_block_selection() {

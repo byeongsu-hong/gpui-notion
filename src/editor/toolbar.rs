@@ -7,7 +7,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable as _, Selectable as _, Sizable as _, h_flex};
 use gpui_kit::{
     Anchor, AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement,
-    ParentElement as _, Point, SharedString, Styled as _, Window, deferred, div, px,
+    ParentElement as _, Pixels, Point, SharedString, Styled as _, Window, deferred, div, px,
 };
 
 use super::actions;
@@ -33,6 +33,9 @@ impl super::view::NotionEditor {
         if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
+        if self.has_block_selection() {
+            return true;
+        }
         let Some((id, range)) = self.selection(cx) else {
             return false;
         };
@@ -53,10 +56,7 @@ impl super::view::NotionEditor {
         if !self.selection_toolbar_visible(cx) {
             return None;
         }
-        let (id, range) = self.selection(cx)?;
-        let ix = self.index_of(id)?;
-        let bounds = self.blocks[ix].state.read(cx).range_to_bounds(&range)?;
-        let position = bounds.origin + Point::new(px(0.), px(-8.));
+        let position = self.toolbar_anchor(cx)?;
 
         let focus = self.focus_handle_for_editor();
         let code_active = self.is_mark_active(&MarkKind::Code, cx);
@@ -97,6 +97,20 @@ impl super::view::NotionEditor {
             .with_priority(OVERLAY_PRIORITY)
             .into_any_element(),
         )
+    }
+
+    /// Where the toolbar hangs: over the selected text, or over the first
+    /// block when whole blocks are selected.
+    fn toolbar_anchor(&self, cx: &App) -> Option<Point<Pixels>> {
+        if self.has_block_selection() {
+            let id = self.selected_blocks().first().copied()?;
+            let bounds = self.block_bounds(id)?;
+            return Some(bounds.origin + Point::new(super::style::GUTTER_CONTROLS_WIDTH, px(-8.)));
+        }
+        let (id, range) = self.selection(cx)?;
+        let ix = self.index_of(id)?;
+        let bounds = self.blocks[ix].state.read(cx).range_to_bounds(&range)?;
+        Some(bounds.origin + Point::new(px(0.), px(-8.)))
     }
 
     fn mark_button(

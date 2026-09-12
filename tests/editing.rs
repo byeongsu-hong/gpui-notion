@@ -4,7 +4,7 @@
 use gpui_kit::component::Root;
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, px, size};
-use gpui_notion::editor::{self, NotionEditor, types};
+use gpui_notion::editor::{self, MarkKind, NotionEditor, types};
 
 struct Harness {
     editor: Entity<NotionEditor>,
@@ -777,4 +777,126 @@ fn an_image_block_takes_a_dropped_file(cx: &mut TestAppContext) {
         assert_eq!(block.attrs.src.as_deref(), Some("/tmp/picture.png"));
         assert_eq!(block.attrs.alt.as_deref(), Some("picture.png"));
     });
+}
+
+#[gpui_kit::test]
+fn dragging_across_blocks_selects_them(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("enter", cx);
+    harness.type_text("three", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.drag_to(("block", 1usize), ("block", 3usize), cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 3);
+
+    // Backspace on that selection takes all three blocks away.
+    harness.ui(cx, |window, cx| window.press("backspace", cx));
+    assert_eq!(harness.texts(cx), vec![""]);
+}
+
+#[gpui_kit::test]
+fn shift_clicking_another_block_selects_the_range(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("enter", cx);
+    harness.type_text("three", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("block", 1usize), cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        let position = window.find(("block", 3usize)).bounds().center();
+        window.dispatch_event(
+            gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position,
+                modifiers: gpui_kit::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 3);
+}
+
+#[gpui_kit::test]
+fn typing_over_selected_blocks_replaces_them(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("shift-up", cx);
+    assert_eq!(cx.update(|cx| harness.editor.read(cx).selected_blocks().len()), 2);
+
+    harness.type_text("x", cx);
+    assert_eq!(harness.texts(cx), vec!["x"]);
+}
+
+#[gpui_kit::test]
+fn bold_over_selected_blocks_marks_all_of_them(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("shift-up", cx);
+
+    harness.press("secondary-b", cx);
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for block in editor.content() {
+            assert!(
+                block.marks.has(&MarkKind::Bold, &(0..block.text.len())),
+                "block {:?} is not bold",
+                block.text
+            );
+        }
+    });
+
+    // A second press takes it off every block again.
+    harness.press("secondary-b", cx);
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for block in editor.content() {
+            assert!(!block.marks.has(&MarkKind::Bold, &(0..block.text.len())));
+        }
+    });
+}
+
+#[gpui_kit::test]
+fn turning_selected_blocks_into_a_list_changes_all_of_them(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("shift-up", cx);
+
+    harness.press("secondary-shift-8", cx);
+    assert_eq!(
+        harness.types(cx),
+        vec![types::BULLET_LIST, types::BULLET_LIST]
+    );
 }

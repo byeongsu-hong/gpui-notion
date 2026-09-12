@@ -2,6 +2,7 @@
 //! them. State lives in one entity, the way GPUI wants it; each block owns a
 //! child `EditorState` entity for its own text.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -10,10 +11,10 @@ use gpui_kit::component::input::{Editor, EditorState, InputEvent};
 use gpui_kit::DragMoveEvent;
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, Font,
-    FontStyle, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, LineFragment,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    Font, FontStyle, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, LineFragment,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
-    StrikethroughStyle, Styled as _, UnderlineStyle, Window, div, px, relative,
+    StrikethroughStyle, Styled as _, UnderlineStyle, Window, canvas, div, px, relative,
 };
 
 use super::actions;
@@ -36,6 +37,13 @@ pub struct NotionEditor {
     focus_handle: FocusHandle,
     /// Block whose input currently holds focus.
     pub(crate) focused: Option<BlockId>,
+    /// Review aid: show every block's gutter controls without hovering.
+    pub(crate) always_show_gutter: bool,
+    /// Where each block sits on screen, refreshed every frame, so the pointer
+    /// can be turned into a block.
+    pub(crate) block_bounds: HashMap<BlockId, Bounds<Pixels>>,
+    /// The block a press started in, which anchors a drag selection.
+    pub(crate) mouse_anchor: Option<BlockId>,
     /// Blocks selected as nodes, e.g. by a drag or Escape.
     pub(crate) selected: Vec<BlockId>,
     /// Width the text column last laid out at, for wrapping measurements.
@@ -59,6 +67,9 @@ impl NotionEditor {
             next_id: 1,
             focus_handle: cx.focus_handle(),
             focused: None,
+            always_show_gutter: false,
+            block_bounds: HashMap::new(),
+            mouse_anchor: None,
             selected: Vec::new(),
             wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
             suggestion: None,
@@ -162,6 +173,11 @@ impl NotionEditor {
             let state = self.blocks[ix].state.clone();
             state.update(cx, |state, cx| state.set_placeholder(text, window, cx));
         }
+    }
+
+    /// Review aid: keep the gutter controls on screen for every block.
+    pub fn show_gutter_always(&mut self) {
+        self.always_show_gutter = true;
     }
 
     /// Focus a block and select a byte range inside it.
@@ -753,12 +769,14 @@ impl NotionEditor {
         };
 
         let selected = self.selected.contains(&id);
+        let probe = self.bounds_probe(id, cx);
         let gutter = self.render_gutter(ix, window, cx);
         let indicator = self.drop_indicator(ix, cx);
 
         div()
             .id(("block", id.0 as usize))
             .test_support()
+            .child(probe)
             .group(group_name(id))
             .relative()
             .w_full()
@@ -781,6 +799,28 @@ impl NotionEditor {
                 this.on_drop_block(dragged, cx)
             }))
             .into_any_element()
+    }
+
+    /// Where a block sits on screen as of the last frame.
+    pub(crate) fn block_bounds(&self, id: BlockId) -> Option<Bounds<Pixels>> {
+        self.block_bounds.get(&id).copied()
+    }
+
+    /// An invisible element that reports where the block landed, which is how
+    /// a pointer position becomes a block.
+    fn bounds_probe(&self, id: BlockId, cx: &mut Context<Self>) -> AnyElement {
+        let editor = cx.entity().downgrade();
+        canvas(
+            move |bounds, _window, cx| {
+                let _ = editor.update(cx, |this, _| {
+                    this.block_bounds.insert(id, bounds);
+                });
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .size_full()
+        .into_any_element()
     }
 
     /// Ordinal of an ordered-list item within its run at the same indent.
@@ -876,6 +916,9 @@ impl Focusable for NotionEditor {
 impl Render for NotionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.refresh_focus(window, cx);
+        // Block bounds are re-reported by every block that lays out this
+        // frame, so blocks that went away leave nothing behind.
+        self.block_bounds.clear();
 
         let visible: Vec<usize> = (0..self.blocks.len())
             .filter(|ix| self.is_visible(*ix))
@@ -901,6 +944,9 @@ impl Render for NotionEditor {
                 gpui_kit::MouseButton::Left,
                 cx.listener(|this, _, _window, cx| this.close_suggestion_menu(cx)),
             )
+            .capture_any_mouse_down(cx.listener(Self::on_page_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_page_mouse_move))
+            .capture_any_mouse_up(cx.listener(Self::on_page_mouse_up))
             .child(
                 v_flex()
                     .id("page")

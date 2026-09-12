@@ -20,6 +20,10 @@ impl NotionEditor {
     /// it arms the mark for the next typed characters.
     pub fn toggle_mark(&mut self, kind: MarkKind, _window: &mut Window, cx: &mut Context<Self>) {
         self.record(Step::Structural, cx);
+        if self.has_block_selection() {
+            self.toggle_mark_over_selected_blocks(kind, cx);
+            return;
+        }
         let Some((id, range)) = self.selection(cx) else {
             return;
         };
@@ -47,6 +51,42 @@ impl NotionEditor {
 
         self.blocks[ix].marks.toggle(kind, range);
         self.apply_decorations(id, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    /// With whole blocks selected a mark covers all of their text, and comes
+    /// off only when every one of them already carries it.
+    fn toggle_mark_over_selected_blocks(&mut self, kind: MarkKind, cx: &mut Context<Self>) {
+        let ids: Vec<BlockId> = self
+            .selected_blocks()
+            .into_iter()
+            .filter(|id| {
+                self.index_of(*id)
+                    .is_some_and(|ix| self.spec_at(ix, cx).caps().marks)
+            })
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        let everywhere = ids.iter().all(|id| {
+            self.block(*id)
+                .is_some_and(|block| block.marks.has(&kind, &(0..block.text.len())))
+        });
+
+        for id in ids {
+            let Some(ix) = self.index_of(id) else { continue };
+            let range = 0..self.blocks[ix].text.len();
+            if range.is_empty() {
+                continue;
+            }
+            if everywhere {
+                self.blocks[ix].marks.remove(&kind, &range);
+            } else {
+                self.blocks[ix].marks.add(kind.clone(), range);
+            }
+            self.apply_decorations(id, cx);
+        }
         cx.emit(DocumentChanged);
         cx.notify();
     }
@@ -228,8 +268,16 @@ impl NotionEditor {
         cx: &mut Context<Self>,
     ) {
         self.record(Step::Structural, cx);
+        let ty = ty.into();
+        if self.has_block_selection() {
+            for id in self.selected_blocks() {
+                self.set_block_type(id, ty.clone(), attrs.clone(), window, cx);
+            }
+            cx.notify();
+            return;
+        }
         let Some(id) = self.active_id() else { return };
-        self.set_block_type(id, ty.into(), attrs, window, cx);
+        self.set_block_type(id, ty, attrs, window, cx);
         self.focus_block(id, Caret::End, window, cx);
     }
 
@@ -242,8 +290,24 @@ impl NotionEditor {
         cx: &mut Context<Self>,
     ) {
         self.record(Step::Structural, cx);
-        let Some(id) = self.active_id() else { return };
         let ty = ty.into();
+        if self.has_block_selection() {
+            let all_are = self.selected_blocks().iter().all(|id| {
+                self.block(*id)
+                    .is_some_and(|block| block.ty == ty && block.attrs.level == attrs.level)
+            });
+            let (ty, attrs) = if all_are {
+                (types::PARAGRAPH.into(), BlockAttrs::default())
+            } else {
+                (ty, attrs)
+            };
+            for id in self.selected_blocks() {
+                self.set_block_type(id, ty.clone(), attrs.clone(), window, cx);
+            }
+            cx.notify();
+            return;
+        }
+        let Some(id) = self.active_id() else { return };
         let is_active = self
             .block(id)
             .map(|b| b.ty == ty && b.attrs.level == attrs.level)
@@ -502,9 +566,28 @@ impl NotionEditor {
     /// Tiptap `sinkListItem`: Tab.
     pub fn sink_list_item(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.record(Step::Structural, cx);
+        if self.has_block_selection() {
+            let mut moved = false;
+            for ix in self.selected_indexes() {
+                moved |= self.sink_block(ix, cx);
+            }
+            return moved;
+        }
         let Some(ix) = self.active_index() else {
             return false;
         };
+        self.sink_block(ix, cx)
+    }
+
+    /// Indexes of the selected blocks, top to bottom.
+    pub(crate) fn selected_indexes(&self) -> Vec<usize> {
+        self.selected_blocks()
+            .into_iter()
+            .filter_map(|id| self.index_of(id))
+            .collect()
+    }
+
+    fn sink_block(&mut self, ix: usize, cx: &mut Context<Self>) -> bool {
         if !self.spec_at(ix, cx).caps().list {
             return false;
         }
@@ -534,9 +617,20 @@ impl NotionEditor {
     /// Tiptap `liftListItem`: Shift-Tab.
     pub fn lift_list_item(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         self.record(Step::Structural, cx);
+        if self.has_block_selection() {
+            let mut moved = false;
+            for ix in self.selected_indexes() {
+                moved |= self.lift_block(ix, window, cx);
+            }
+            return moved;
+        }
         let Some(ix) = self.active_index() else {
             return false;
         };
+        self.lift_block(ix, window, cx)
+    }
+
+    fn lift_block(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.blocks[ix].indent > 0 {
             self.blocks[ix].indent -= 1;
             let id = self.blocks[ix].id;
