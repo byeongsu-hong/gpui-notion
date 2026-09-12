@@ -7,7 +7,7 @@
 
 use gpui_kit::component::input::{
     Backspace, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight, MoveUp,
-    OutdentInline,
+    OutdentInline, Redo, Undo,
 };
 use gpui_kit::{App, Context, Focusable as _, InteractiveElement, Window};
 
@@ -70,6 +70,14 @@ impl NotionEditor {
             .capture_action(cx.listener(Self::on_tab))
             .capture_action(cx.listener(Self::on_shift_tab))
             .capture_action(cx.listener(Self::on_escape))
+            .capture_action(cx.listener(|this, _: &Undo, window, cx| {
+                this.undo(window, cx);
+                cx.stop_propagation();
+            }))
+            .capture_action(cx.listener(|this, _: &Redo, window, cx| {
+                this.redo(window, cx);
+                cx.stop_propagation();
+            }))
             // -------------------------------------------------------- commands
             .on_action(cx.listener(|this, _: &actions::ToggleBold, window, cx| {
                 this.toggle_bold(window, cx)
@@ -159,6 +167,20 @@ impl NotionEditor {
             .on_action(cx.listener(|this, _: &actions::OpenSlashMenu, window, cx| {
                 this.open_slash_menu(window, cx)
             }))
+            .on_action(cx.listener(|this, _: &actions::CopyBlock, _window, cx| {
+                this.copy_active_block(cx)
+            }))
+            .on_action(cx.listener(|this, _: &actions::SetLink, window, cx| {
+                this.open_link_editor(window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, action: &actions::ApplyColor, window, cx| match action {
+                    actions::ApplyColor::Text(color) => this.set_color(*color, window, cx),
+                    actions::ApplyColor::Highlight(color) => {
+                        this.toggle_highlight(Some(*color), window, cx)
+                    }
+                }),
+            )
     }
 
     // ------------------------------------------------------------- handlers
@@ -298,6 +320,11 @@ impl NotionEditor {
     }
 
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.link_editor_is_open() {
+            self.close_link_editor(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.slash_menu_is_open() {
             self.close_slash_menu(cx);
             cx.stop_propagation();

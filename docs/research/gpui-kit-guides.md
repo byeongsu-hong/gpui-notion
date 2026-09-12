@@ -119,7 +119,7 @@ Findings from `src/editor/**` measured against the rules above.
 2. **`Entity<NotionEditor>` holding `Vec<Block>` + all editing, selection, slash-menu and overlay state** risks "one entity containing the entire application's unrelated state". Rule: narrowest correct owner; split document model / selection / overlay state so updates and notifies stay local. `CG:211`, `CG:843`
 3. **Each block owning `Entity<EditorState>` while the parent also caches block text** is a classic duplicated-state drift and a feedback loop: parent writes a value into the state which re-emits `InputEvent::Change` back. Rule: controlled value with one source of truth + origin tracking so one logical change is reported once. `CG:225`, `CG:249`
 4. **`.id(("block", id.0 as usize))`** (`view.rs:556`) is domain-derived — keep it that way; audit every other repeated child (gutter buttons, slash items, marks) for index-derived or per-frame IDs and namespace them under the block ID. `CG:261`, `CG:262`, `CG:265`
-5. **Block-level subscriptions vector** (`view.rs:174`–`206`, `block.rs:390`): confirm subscriptions are dropped when a block is deleted and recreated on re-insert, and that no block subscribes back to the editor (mutual subscription loop). `EV:196`, `EV:224`
+5. **Block-level subscriptions vector** (`view.rs:174`–`206`, `block.rs:386,:392`): confirm subscriptions are dropped when a block is deleted and recreated on re-insert, and that no block subscribes back to the editor (mutual subscription loop). `EV:196`, `EV:224`
 6. **Overlays via `deferred()` + `Positioner`**: inside a `defer_in` callback the current entity is locked — calling `editor.update(cx, …)` from a block's deferred callback (or `block_state.read(cx)` from the editor's render closure) panics. Use the `&mut` reference the callback provides and snapshot fields for render. `EN:159`, `EN:196`
 7. **Hand-built slash menu** (`slash.rs`) instead of `PopupMenu`/`Command`: rebuilds arrow navigation, confirm/cancel, disabled items, focus transfer and restoration, dismissal. Rule: compose the standard semantic component, or extend its API. `CG:308`, `DG:575`
 8. **Custom `BlockSpec` registry as a public seam** (`pub struct BlockId(pub u64)`, `pub` fields in `BlockAttrs`, `pub type BlockType = SharedString`): public fields across a seam need `#[non_exhaustive]` + builders/readers; type-alias-as-enum loses exhaustiveness. `SK:89`, `CG:616`
@@ -175,3 +175,70 @@ fn typing_splits_a_block(cx: &mut TestAppContext) {
 - `Animation` uses wall-clock time; advancing test time does not finish it — use reduced motion or a bounded wait before asserting final geometry. `T:220`
 - Always include a negative case (disabled control rejects the interaction, invalid input blocks save) and assert the visible outcome after each meaningful action. `T:65`
 - Not covered in-process: pixels, packaged-app behavior, full OS IME composition. `label()` is the accessibility name, not rendered text. `T:228`, `T:222`
+
+## 5. Audit of gpui-notion
+
+Format: `path:line — rule broken (citation) — fix`.
+
+### State ownership / entity vs element
+
+- `src/editor/block.rs:386,:392` — `pub state: Entity<EditorState>` and `pub subscriptions: Vec<Subscription>` publish behavioral state across the seam; private fields are the default for state that must evolve (`CG:616`) — make both private, expose `state(&self) -> &Entity<EditorState>`, and keep subscription ownership an implementation detail.
+- `src/editor/block.rs:382` — `pub text: String` mirrors `EditorState`'s value, a second source of truth that must be resynced on every `InputEvent::Change` (`CG:225`, `CG:249`) — keep the mirror but make it private with a `text()` reader, and document in one place that `EditorState` is authoritative and `text` is the diff snapshot.
+- `src/editor/view.rs:33-48` — one `NotionEditor` entity owns document, focus, hover, node selection, slash menu, drag target and wrap width; "one entity containing the entire application's unrelated state" is a named failure mode (`CG:843`, `CG:211`) — split at least the transient interaction state (`hovered`, `selected`, `slash`, `drop_target`) into a `SelectionState`/`SlashMenuState` so an edit does not notify the drag machinery.
+- `src/editor/slash.rs:21-28` — `SlashMenu` is retained interaction state with `pub` fields mutated from several modules (`slash.rs:141`, `keymap.rs:301`) (`CG:616`, `CG:211`) — private fields + `query()`, `selected_ix()`, `select(delta)`.
+- `src/editor/block.rs:452-466` — `BlockContent` builders are correct (`with_attrs`/`with_marks`/`with_indent`, `CG:685`); keep that shape when the type gains fields.
+- `src/editor/view.rs:181` — per-block `cx.subscribe_in` stored on the block is right (`EV:196`, `US:7`); verify `remove_block` (`view.rs:230`) drops them — it does, via `Vec::remove`. No change.
+- `src/editor/block.rs:200`, `src/editor/slash.rs:35` — `run: fn(&mut NotionEditor, …)` hard-wires the registry to the concrete view, so `BlockSpec` cannot be reused by another host (`CG:28`, dependency direction) — take a command enum or a `&mut dyn BlockCommands` seam instead.
+
+### ElementId stability
+
+- `src/editor/view.rs:567` — `.id(("block", id.0 as usize))` is a domain-derived, namespaced ID and is **correct** (`CG:261-262`, `EID:34`); the same applies to `gutter.rs:81` `("insert", id.0 as usize)`. Keep it.
+- `src/editor/slash.rs:219` — `.id(("slash-item", index))` keys a row by its position in a *filtered* list, so the same ID means a different command after every keystroke (`CG:263`, `CG:845`) — key by the item's title/command identity: `("slash-item", item.title)`.
+- `src/editor/view.rs:625` — `group_name` builds a `SharedString` with `format!` for every block on every frame (`CG:834`) — store the group name on the `Block` once, or derive the group from the already-stable `ElementId`.
+
+### `pub` fields on public types — what the guide actually requires
+
+The rule is: private fields are the default for behavioral state; `pub` fields are acceptable only for deliberately record-like configuration/geometry/serialized schemas, and then **every public struct with public fields must carry `#[non_exhaustive]`** plus a constructor, `Default`, or builders so callers never write an exhaustive struct literal (`SK:89`, `CG:616-622`).
+
+- `src/editor/block.rs:46` `BlockAttrs`, `:86` `BlockCaps`, `:135` `BlockLayout`, `:184` `BlockInputRule`, `:192` `SlashItem`, `:203` `BlockContext`, `:413` `BlockContent`, `src/editor/gutter.rs:19` `DraggedBlock`, `:47` `DropTarget` — record-like, so `pub` fields are allowed, but none is `#[non_exhaustive]` (`CG:619`) — add `#[non_exhaustive]` to each and keep `Default`/semantic constructors so adding a field is not a breaking change.
+- `src/editor/block.rs:24` — `pub struct BlockId(pub u64)` exposes the representation of an identity (`CG:616`) — make the field private with `BlockId::new(u64)`/`get()`, or accept it as a record-like newtype and mark it `#[non_exhaustive]`.
+- `src/editor/ui.rs:12` — `pub struct Lucide(pub &'static str)` same issue, plus it duplicates `path()`/`path_string()` (`ui.rs:16`, `ui.rs:29`) — one inherent method, private field.
+- `src/editor/block.rs:27` — `pub type BlockType = SharedString` gives a public API no type safety and no exhaustiveness (`CG:668` value-like types are nouns; `CG:733` id vs index precision) — keep the open registry, but wrap it: `pub struct BlockType(SharedString)` with `as_str()`.
+
+### Colors, `px`, tokens
+
+- `src/editor/style.rs:57,75-88,95-113` — raw `gpui_kit::rgb(0x…)` Notion palette in application code (`CG:357`, `DG:153`). The guides' handling for a palette that is *not* a theme token: raw colors belong only in the theme/token definition layer; if the semantic role does not exist, **define it in the product's theme/token layer** rather than at the call site (`DG:155-157`, `CG:428`). Fix: promote `style.rs` into an explicit product token type (e.g. `NotionTokens { highlight: [Hsla; 7], text_colors: […] }`) stored as a global/design-system state, resolved once per theme change (and re-derived on `Theme::change`), with call sites reading `NotionTokens::global(cx).highlight(color)`. The user-chosen highlight/text colors are then documented, audited data colors — the one allowed exception (`CG:430`).
+- `src/editor/style.rs:9-32` — every page metric is a `px()` constant, and `block.rs:161-171`, `blocks.rs:82-85,149,194,258,377-389,453-477,524-538,608-618`, `ui.rs:40-77`, `gutter.rs:28-84`, `slash.rs:206-245` repeat literal `px()` in layout (110 occurrences total) — application layout must not call `px(...)`; use rem helpers and component sizes so type, spacing, icons and hit targets zoom together (`CG:359`, `CG:428`, `DG:382`). Fix: express page width/padding/indent/markers with `w_*`, `p_*`, `gap_*`, `text_sm/base/lg`, and keep `px()` only for the hairline in `blocks.rs:618` and documented raster/physical boundaries.
+- `src/editor/view.rs:44,:60` — `wrap_width` is initialised from constants and never keyed on `window.rem_size()`, while `measure_rows` (`view.rs:450-472`) caches nothing but *depends* on rem-derived text size (`CG:433`) — include `window.rem_size()` (and the theme revision) in whatever invalidates measurement, and set `wrap_width` from real layout, not from `PAGE_WIDTH - PAGE_PADDING*2`.
+
+### Render-time allocation and performance
+
+- `src/editor/view.rs:450-472` (via `render_text` → `block_height` → `measure_rows`) — every frame re-wraps **every** block's text with a fresh `line_wrapper` to compute a fixed height; measurement per frame for the whole document breaks "avoid rebuilding expensive structures per frame" and "measure before adding caches; a cache must have a clear invalidation owner" (`CG:830`, `CG:437`) — cache row counts on the `Block`, invalidated by text change + `wrap_width` + `rem_size` + font revision.
+- `src/editor/gutter.rs:65` — `block.text.clone()` allocates the full block text every frame just to build a drag preview (`CG:834`) — clone lazily inside the drag listener.
+- `src/editor/view.rs:681-686` — `render` materialises `Vec<usize>` + `Vec<AnyElement>` for all blocks with no virtualization; long documents need `v_virtual_list` with model-coordinate keyboard selection (`CG:579`, `CG:589`).
+- `src/editor/slash.rs:121-139, :199` — `slash_items(cx)` rebuilds and re-filters the whole registry list inside `render_slash_menu`, and again in `move_slash_selection`/`confirm_slash_item`; render callbacks should be cheap and side-effect-free (`CG:316`, `CG:829`) — resolve the filtered list once when the query changes and store it on the menu state.
+
+### Naming and doc comments
+
+- `src/editor/block.rs:206` `BlockContext.index`, `src/editor/slash.rs:171` `run_slash_item(index)` — new zero-based indices use `ix`, never `index`/`idx` (`CG:759`, `CG:698`) — rename to `ix` (keep `selected_index`-style established Kit names untouched).
+- `src/editor/block.rs:77,81` — `BlockAttrs::get`/`set` are vague public names (`CG:742`); a plain reader takes the field noun and in-place mutation is `set_<field>` (`CG:684`, `CG:686`) — `extra(key)` / `set_extra(key, value)`.
+- `src/editor/block.rs:89` `BlockCaps` / `caps()` — abbreviation that is not an established ecosystem term and mixes abbreviation levels with `BlockLayout`/`BlockAttrs` (`CG:113`, `CG:653`) — `BlockCapabilities`/`capabilities()`, or document the short form.
+- `src/editor/view.rs:31` `DocumentChanged` — semantic notifications are `<Control>Event` (`CG:672`) — `EditorEvent::DocumentChanged`.
+- `src/editor/view.rs:751` `focus_handle_for_editor()` duplicates `Focusable::focus_handle` with a role-less name (`CG:742`) — delete it and call `self.focus_handle(cx)`.
+- `src/editor/block.rs:194` `SlashItem.subtext` — the ecosystem term is `description` (`CG:661` vocabulary is part of the API).
+- `src/editor/view.rs:41-43` — `focused`, `hovered`, `selected` are used precisely here (`CG:724`); keep that discipline in `BlockContext` too.
+- `src/editor/block.rs:377`, `:413` — public docs must say **who owns the state** and note any required `notify`/`emit` (`CG:782`); `Block`'s doc does not say that mutating it requires `cx.notify()` + `cx.emit(DocumentChanged)` — add it.
+- `src/editor/block.rs:29`, `:348`, `:76`, `src/editor/view.rs:82-99`, `src/editor/ui.rs:20` — `pub mod types`, `BlockRegistry::iter`, `BlockAttrs::get/set`, `block_count`/`index_of`/`block`/`block_mut`/`spec_at`, `ui::icon` are public with no doc comment (`CG:782`) — one line each: what it does, who owns the result.
+
+### Overlays, Escape, focus return
+
+- `src/editor/actions.rs:34,67` — `Cancel` is bound to `escape` but no handler exists anywhere (`on_escape` handles `input::Escape`, `keymap.rs:300`); a registered Action without a handler on the focused path is not a working keyboard interaction (`CG:481`) — either handle `Cancel` on the editor region or delete the action and binding.
+- `src/editor/slash.rs:237-247` — the menu is a hand-built `deferred` + `Positioner` surface, so it re-implements what `PopupMenu`/`Command` already own (arrow navigation, confirm/cancel, disabled items, groups, focus transfer and restoration, outside-click dismissal) (`CG:308`, `CG:847`, `DG:575`) — compose the Kit menu, or extend its API.
+- `src/editor/slash.rs:241` — `.occlude()` blocks clicks through the popup but nothing dismisses the menu on an outside click or on window blur; a menu's dismissal model is part of its contract (`CG:308`, `DG:643`) — add outside-press dismissal.
+- `src/editor/slash.rs:44-60` — opening the menu never moves focus and there is no focus trap or restore point; overlays must transfer focus on open and restore it on dismissal (`CG:477`). Here focus deliberately stays in the block input, which is the right editor behavior — document that exception next to `open_slash_menu` (`CG:653`) so it is not read as an omission.
+- `src/editor/keymap.rs:300-317` — Escape closes the menu, then clears selection, then selects the block: correct topmost-first ordering (`DG:643`). But the third branch moves focus to the editor handle without a visible `focus_visible` treatment on the page root (`CG:478`) — render a focus ring or rely on the selected-block highlight and say so.
+- `src/editor/view.rs:680-725` — `render` never mounts `Root::render_dialog_layer`/`render_sheet_layer`/`render_notification_layer`, so any dialog (link editor, confirmations) or notification will simply not appear (`RC:8`, `T:55`, `US:389`) — add the three `.children(...)` calls to the root element.
+- `src/editor/ui.rs:55`, `:73` — `cursor_pointer()` on menu rows and toolbar buttons; desktop menu items and buttons use the default arrow cursor, the pointing hand is for links (`DG:545`) — drop `cursor_pointer` (keep `cursor_text()` on `view.rs:718`, which is correct).
+- `src/editor/gutter.rs:78-81` — the `+` and drag handle are `invisible()` until `group_hover`; a hover-revealed icon is acceptable only as a shortcut to a command reachable elsewhere (`DG:567`, `DG:551`) — `+` is covered by Enter, but drag-reorder needs its `MoveBlockUp`/`MoveBlockDown` bindings surfaced in a context menu or tooltip with the shortcut.
+- `src/editor/slash.rs:205-215` — group headings are rendered as plain `div`s with literal `px(11.)` text; menus should reuse the themed popover/menu geometry (`DG:404`) — use the Kit menu's group/label part.
+

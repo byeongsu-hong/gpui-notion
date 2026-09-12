@@ -29,6 +29,12 @@ pub const INDENT_WIDTH: Pixels = px(24.);
 /// Width reserved for a bullet, number or checkbox.
 pub const MARKER_WIDTH: Pixels = px(24.);
 
+/// Horizontal padding `Input` gives a multi-line editor at the default size
+/// (`Size::Medium::input_px`). Blocks cancel it so text lines up with markers.
+pub const INPUT_PAD_X: Pixels = px(10.);
+/// Vertical counterpart (`Size::Medium::input_py`).
+pub const INPUT_PAD_Y: Pixels = px(8.);
+
 /// Radius of popovers (slash menu, bubble toolbar, link editor).
 pub const POPOVER_RADIUS: Pixels = px(8.);
 

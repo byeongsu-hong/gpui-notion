@@ -10,6 +10,7 @@ use gpui_kit::{App, Context, SharedString, Window};
 
 use super::block::{BlockAttrs, BlockContent, BlockId, BlockRegistry, BlockType, types};
 use super::mark::{Edit, HighlightColor, MarkKind, TextColor};
+use super::history::Step;
 use super::view::{Caret, DocumentChanged, NotionEditor};
 
 impl NotionEditor {
@@ -18,6 +19,7 @@ impl NotionEditor {
     /// Tiptap `toggleMark`. With a selection it formats it; with a bare caret
     /// it arms the mark for the next typed characters.
     pub fn toggle_mark(&mut self, kind: MarkKind, _window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some((id, range)) = self.selection(cx) else {
             return;
         };
@@ -50,6 +52,7 @@ impl NotionEditor {
     }
 
     pub fn set_mark(&mut self, kind: MarkKind, _window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some((id, range)) = self.selection(cx) else {
             return;
         };
@@ -184,6 +187,7 @@ impl NotionEditor {
 
     /// Tiptap `unsetAllMarks` — the template's "Reset formatting".
     pub fn unset_all_marks(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some((id, range)) = self.selection(cx) else {
             return;
         };
@@ -223,6 +227,7 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.record(Step::Structural, cx);
         let Some(id) = self.active_id() else { return };
         self.set_block_type(id, ty.into(), attrs, window, cx);
         self.focus_block(id, Caret::End, window, cx);
@@ -236,6 +241,7 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.record(Step::Structural, cx);
         let Some(id) = self.active_id() else { return };
         let ty = ty.into();
         let is_active = self
@@ -283,6 +289,7 @@ impl NotionEditor {
     }
 
     pub fn toggle_check(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(block) = self.block_mut(id) else {
             return;
         };
@@ -294,6 +301,7 @@ impl NotionEditor {
 
     /// Tiptap `setHorizontalRule`: replaces an empty block, else inserts after.
     pub fn set_horizontal_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         if self.blocks[ix].text.is_empty() {
             let id = self.blocks[ix].id;
@@ -377,6 +385,7 @@ impl NotionEditor {
     /// Tiptap `splitBlock`: Enter. The text after the caret starts a new block
     /// of the type this one splits into.
     pub fn split_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         let range = self.blocks[ix].state.read(cx).selected_range();
         let (start, end) = (range.start, range.end);
@@ -423,6 +432,7 @@ impl NotionEditor {
 
     /// Tiptap `joinBackward`: Backspace at the start of a block.
     pub fn join_backward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
 
         // A formatted block first returns to a plain paragraph.
@@ -463,6 +473,7 @@ impl NotionEditor {
 
     /// Delete at the end of a block pulls the next one up.
     pub fn join_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         if ix + 1 >= self.blocks.len() {
             return;
@@ -489,6 +500,7 @@ impl NotionEditor {
 
     /// Tiptap `sinkListItem`: Tab.
     pub fn sink_list_item(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else {
             return false;
         };
@@ -518,6 +530,7 @@ impl NotionEditor {
 
     /// Tiptap `liftListItem`: Shift-Tab.
     pub fn lift_list_item(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else {
             return false;
         };
@@ -537,6 +550,7 @@ impl NotionEditor {
     }
 
     pub fn duplicate_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         let content = self.blocks[ix].content();
         let id = self.insert_block(ix + 1, content, window, cx);
@@ -544,6 +558,7 @@ impl NotionEditor {
     }
 
     pub fn delete_active_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         if self.blocks.len() == 1 {
             let id = self.blocks[ix].id;
@@ -561,6 +576,7 @@ impl NotionEditor {
 
     /// Move a block past its neighbour, taking focus with it.
     pub fn move_block(&mut self, delta: isize, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         let Some(ix) = self.active_index() else { return };
         let target = ix as isize + delta;
         if target < 0 || target as usize >= self.blocks.len() {
@@ -573,6 +589,7 @@ impl NotionEditor {
 
     /// Move the block at `from` so it lands before index `to`, as a drag does.
     pub fn reorder_block(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        self.record(Step::Structural, cx);
         if from >= self.blocks.len() || to > self.blocks.len() || from == to {
             return;
         }
@@ -640,6 +657,13 @@ impl NotionEditor {
             .marks
             .remap(&Edit::new(range, replacement.len()));
         self.set_block_text(ix, text, caret, window, cx);
+    }
+
+    /// Put the active block's text on the clipboard.
+    pub fn copy_active_block(&mut self, cx: &mut Context<Self>) {
+        let Some(ix) = self.active_index() else { return };
+        let text = self.blocks[ix].text.clone();
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text));
     }
 
     /// Insert plain text at the caret, as a paste of unformatted text does.

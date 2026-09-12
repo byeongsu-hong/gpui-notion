@@ -46,6 +46,10 @@ pub struct NotionEditor {
     pub(crate) slash: Option<super::slash::SlashMenu>,
     /// Where a dragged block would land.
     pub(crate) drop_target: Option<super::gutter::DropTarget>,
+    /// The open link editor, if any.
+    pub(crate) link_editor: Option<super::toolbar::LinkEditor>,
+    /// Undo and redo for the document as a whole.
+    pub(crate) history: super::history::History,
 }
 
 impl NotionEditor {
@@ -60,6 +64,8 @@ impl NotionEditor {
             wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
             slash: None,
             drop_target: None,
+            link_editor: None,
+            history: super::history::History::default(),
         };
         this.insert_block(0, BlockContent::paragraph(""), window, cx);
         this
@@ -108,6 +114,30 @@ impl NotionEditor {
         self.focused
             .or_else(|| self.selected.first().copied())
             .or_else(|| self.blocks.first().map(|b| b.id))
+    }
+
+    /// Adopt whichever block's input holds keyboard focus.
+    ///
+    /// A block input takes focus from a click without the editor hearing
+    /// about it, so the window is the authority on which block is active and
+    /// the field below is a cache of it, refreshed each frame.
+    pub(crate) fn refresh_focus(&mut self, window: &Window, cx: &App) {
+        use gpui_kit::Focusable as _;
+        let focused = self
+            .blocks
+            .iter()
+            .find(|block| block.state.focus_handle(cx).is_focused(window))
+            .map(|block| block.id);
+        if focused.is_some() && focused != self.focused {
+            self.focused = focused;
+            self.selected.clear();
+        }
+    }
+
+    /// Focus handle of the block at `ix`, for tests and hosts.
+    pub fn block_focus_handle(&self, ix: usize, cx: &App) -> Option<FocusHandle> {
+        use gpui_kit::Focusable as _;
+        Some(self.blocks.get(ix)?.state.focus_handle(cx))
     }
 
     /// The block whose input holds focus, if any.
@@ -295,6 +325,7 @@ impl NotionEditor {
         if new_text == self.blocks[ix].text {
             return;
         }
+        self.record(super::history::Step::Typing, cx);
         let old_text = std::mem::replace(&mut self.blocks[ix].text, new_text.clone());
 
         if let Some(edit) = diff_edit(&old_text, &new_text) {
@@ -474,8 +505,22 @@ impl NotionEditor {
             .max(1)
     }
 
+    /// Height the block's input needs for its text.
+    ///
+    /// The input lays out inside the height it is given, so the height has to
+    /// be known before layout: it is estimated by wrapping the text the way
+    /// the text system will, then reconciled with what the last layout
+    /// actually produced.
     pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
-        layout.line_height_px() * self.measure_rows(ix, layout, cx) as f32
+        let state = self.blocks[ix].state.read(cx);
+        let line_height = state.line_height().unwrap_or(layout.line_height_px());
+        let estimate = line_height * self.measure_rows(ix, layout, cx) as f32;
+
+        let measured = state
+            .range_to_bounds(&(0..self.blocks[ix].text.len()))
+            .map(|bounds| bounds.size.height)
+            .unwrap_or(estimate);
+        estimate.max(measured) + style::INPUT_PAD_Y * 2.
     }
 
     // ------------------------------------------------------------- rendering
@@ -506,16 +551,23 @@ impl NotionEditor {
         let mut color = cx.theme().foreground;
         color.a *= layout.text_opacity;
 
-        Editor::new(&block.state)
-            .appearance(false)
-            .bordered(false)
-            .h(height)
-            .font_family(family)
-            .text_size(layout.text_size)
-            .font_weight(layout.font_weight)
-            .line_height(relative(layout.line_height))
-            .text_color(color)
-            .p_0()
+        // The input pads its own text area; the negative margins put the
+        // first glyph exactly on the block's content edge, where the markers
+        // and every other block element are.
+        div()
+            .mx(-style::INPUT_PAD_X)
+            .my(-style::INPUT_PAD_Y)
+            .child(
+                Editor::new(&block.state)
+                    .appearance(false)
+                    .bordered(false)
+                    .h(height)
+                    .font_family(family)
+                    .text_size(layout.text_size)
+                    .font_weight(layout.font_weight)
+                    .line_height(relative(layout.line_height))
+                    .text_color(color),
+            )
             .into_any_element()
     }
 
@@ -678,6 +730,8 @@ impl Focusable for NotionEditor {
 
 impl Render for NotionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_focus(window, cx);
+
         let visible: Vec<usize> = (0..self.blocks.len())
             .filter(|ix| self.is_visible(*ix))
             .collect();
@@ -723,6 +777,8 @@ impl Render for NotionEditor {
                     ),
             )
             .children(self.render_slash_menu(window, cx))
+            .children(self.render_selection_toolbar(window, cx))
+            .children(self.render_link_editor(window, cx))
     }
 }
 

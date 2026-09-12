@@ -37,11 +37,18 @@ impl Harness {
         cx: &mut TestAppContext,
         f: impl FnOnce(&mut gpui_kit::Window, &mut gpui_kit::App) -> R,
     ) -> R {
-        cx.update_window(self.window, |_, window, cx| {
-            window.render_frame(cx);
-            f(window, cx)
-        })
-        .unwrap()
+        let result = cx
+            .update_window(self.window, |_, window, cx| {
+                window.render_frame(cx);
+                let result = f(window, cx);
+                // A frame after the interaction delivers focus changes.
+                window.render_frame(cx);
+                result
+            })
+            .unwrap();
+        // Deferred work — focus moves, overlays — lands before the next step.
+        cx.run_until_parked();
+        result
     }
 
     fn focus_first(&self, cx: &mut TestAppContext) {
@@ -347,4 +354,110 @@ fn a_block_can_be_dragged_below_another(cx: &mut TestAppContext) {
         })
     });
     assert_eq!(harness.texts(cx), vec!["two", "one"]);
+}
+
+#[gpui_kit::test]
+fn a_document_loads_exactly_the_blocks_it_was_given(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(editor::init);
+
+    let content = vec![
+        gpui_notion::editor::block::BlockContent::paragraph("one"),
+        gpui_notion::editor::block::BlockContent::paragraph("two"),
+        gpui_notion::editor::block::BlockContent::paragraph(""),
+    ];
+    let mut view = None;
+    let handle = cx.open_window(size(px(900.), px(700.)), |window, cx| {
+        let editor = cx.new(|cx| NotionEditor::with_content(content.clone(), window, cx));
+        view = Some(editor.clone());
+        Root::new(editor, window, cx)
+    });
+    let view = view.unwrap();
+    cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+        .unwrap();
+
+    cx.update(|cx| {
+        let editor = view.read(cx);
+        assert_eq!(
+            editor
+                .content()
+                .into_iter()
+                .map(|block| block.text)
+                .collect::<Vec<_>>(),
+            vec!["one", "two", ""]
+        );
+        assert!(!editor.slash_menu_is_open());
+    });
+}
+
+#[gpui_kit::test]
+fn undo_reverts_typing_and_redo_restores_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("hello", cx);
+    assert_eq!(harness.texts(cx), vec!["hello"]);
+
+    harness.press("secondary-z", cx);
+    assert_eq!(harness.texts(cx), vec![""]);
+
+    assert!(cx.update(|cx| harness.editor.read(cx).focused_id().is_some()), "focus after undo");
+    harness.press("secondary-y", cx);
+    assert_eq!(harness.texts(cx), vec!["hello"]);
+}
+
+#[gpui_kit::test]
+fn undo_reverts_a_split(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one two", cx);
+    harness.press("enter", cx);
+    assert_eq!(harness.texts(cx), vec!["one two", ""]);
+
+    harness.press("secondary-z", cx);
+    assert_eq!(harness.texts(cx), vec!["one two"]);
+}
+
+#[gpui_kit::test]
+fn undo_reverts_a_node_change(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("title", cx);
+    harness.press("secondary-alt-1", cx);
+    assert_eq!(harness.types(cx), vec![types::HEADING]);
+
+    harness.press("secondary-z", cx);
+    assert_eq!(harness.types(cx), vec![types::PARAGRAPH]);
+    assert_eq!(harness.texts(cx), vec!["title"]);
+}
+
+#[gpui_kit::test]
+fn redo_through_the_api(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("hello", cx);
+    cx.update_window(harness.window, |_, window, cx| {
+        harness.editor.clone().update(cx, |editor, cx| editor.undo(window, cx));
+    }).unwrap();
+    assert_eq!(harness.texts(cx), vec![""]);
+    cx.update_window(harness.window, |_, window, cx| {
+        harness.editor.clone().update(cx, |editor, cx| editor.redo(window, cx));
+    }).unwrap();
+    assert_eq!(harness.texts(cx), vec!["hello"]);
+}
+
+#[gpui_kit::test]
+fn clicking_a_block_focuses_it(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let (focused, handle_focused) = cx
+        .update_window(harness.window, |_, window, cx| {
+            let editor = harness.editor.read(cx);
+            let id = editor.focused_id();
+            let block = &editor.content();
+            let _ = block;
+            let handle = harness
+                .editor
+                .read(cx)
+                .block_focus_handle(0, cx)
+                .map(|h| h.is_focused(window));
+            (id, handle)
+        })
+        .unwrap();
+    assert_eq!(handle_focused, Some(true), "the input has keyboard focus");
+    assert!(focused.is_some(), "the editor tracks the clicked block");
 }

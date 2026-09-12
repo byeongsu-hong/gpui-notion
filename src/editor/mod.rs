@@ -12,11 +12,13 @@ pub mod block;
 pub mod blocks;
 pub mod commands;
 pub mod gutter;
+pub mod history;
 pub mod input_rules;
 pub mod keymap;
 pub mod mark;
 pub mod slash;
 pub mod style;
+pub mod toolbar;
 pub mod ui;
 pub mod view;
 

@@ -1,7 +1,9 @@
 //! The left gutter: the `+` insert button and the drag handle, plus the
 //! drag-to-reorder machinery they drive.
 
-use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenu};
+use gpui_kit::component::{ActiveTheme, Sizable as _};
 use gpui_kit::{
     AnyElement, App, AppContext as _, Context, DragMoveEvent, InteractiveElement as _, IntoElement,
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -11,7 +13,9 @@ use gpui_kit::TestSupportExt as _;
 
 use super::block::BlockId;
 use super::style;
-use super::ui;
+use super::actions;
+use super::block::BlockRegistry;
+use super::ui::{self, Lucide};
 use super::view::{Caret, NotionEditor, group_name};
 
 /// The payload carried while dragging a block.
@@ -64,6 +68,10 @@ impl NotionEditor {
         let id = block.id;
         let text = block.text.clone();
         let layout = self.layout_at(ix, cx);
+        let label = BlockRegistry::global(cx)
+            .get(&block.ty)
+            .label(&block.attrs);
+        let focus = self.focus_handle_for_editor();
         // Centre the controls on the block's first line.
         let top = (layout.line_height_px() - px(24.)).max(px(0.)) / 2.;
 
@@ -78,31 +86,34 @@ impl NotionEditor {
             .invisible()
             .group_hover(group_name(id), |this| this.visible())
             .child(
-                ui::toolbar_button(("insert", id.0 as usize), false, cx)
-                    .test_support()
-                    .size(px(24.))
-                    .child(ui::icon("plus", px(16.), cx.theme().muted_foreground))
-                    .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Insert block").build(window, cx))
+                Button::new(("insert", id.0 as usize))
+                    .ghost()
+                    .xsmall()
+                    .icon(Lucide("plus"))
+                    .tooltip("Insert block")
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.insert_block_below(id, window, cx)
                     })),
             )
             .child(
-                ui::toolbar_button(("grip", id.0 as usize), false, cx)
-                    .test_support()
-                    .size(px(24.))
-                    .child(ui::icon(
-                        "grip-vertical",
-                        px(16.),
-                        cx.theme().muted_foreground,
-                    ))
-                    .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Click for options, hold for drag").build(window, cx))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_block_as_node(id, window, cx)
-                    }))
+                div()
+                    .id(("drag", id.0 as usize))
                     .on_drag(DraggedBlock { id }, move |_, _, _, cx| {
                         cx.new(|_| DragPreview { text: text.clone() })
-                    }),
+                    })
+                    .child(
+                        Button::new(("grip", id.0 as usize))
+                            .ghost()
+                            .xsmall()
+                            .icon(Lucide("grip-vertical"))
+                            .tooltip("Click for options, hold for drag")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_block_as_node(id, window, cx)
+                            }))
+                            .dropdown_menu(move |menu, window, cx| {
+                                block_menu(id, label.clone(), focus.clone(), menu, window, cx)
+                            }),
+                    ),
             )
             .into_any_element()
     }
@@ -192,3 +203,42 @@ trait WhenElse: Sized {
 }
 
 impl<T: Sized> WhenElse for T {}
+
+/// The block options menu, opened from the drag handle.
+fn block_menu(
+    id: BlockId,
+    label: gpui_kit::SharedString,
+    focus: gpui_kit::FocusHandle,
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let _ = id;
+    let turn_into_focus = focus.clone();
+    menu.action_context(focus)
+        .label(label)
+        .submenu("Turn into", window, cx, {
+            let focus = turn_into_focus.clone();
+            move |menu, _, _| {
+                menu.action_context(focus.clone())
+                    .menu("Text", Box::new(actions::SetParagraph))
+                    .menu("Heading 1", Box::new(actions::SetHeading1))
+                    .menu("Heading 2", Box::new(actions::SetHeading2))
+                    .menu("Heading 3", Box::new(actions::SetHeading3))
+                    .menu("Bulleted list", Box::new(actions::ToggleBulletList))
+                    .menu("Numbered list", Box::new(actions::ToggleOrderedList))
+                    .menu("To-do list", Box::new(actions::ToggleTaskList))
+                    .menu("Blockquote", Box::new(actions::ToggleBlockquote))
+                    .menu("Code block", Box::new(actions::ToggleCodeBlock))
+            }
+        })
+        .menu("Reset formatting", Box::new(actions::ClearMarks))
+        .separator()
+        .menu("Duplicate", Box::new(actions::DuplicateBlock))
+        .menu("Copy to clipboard", Box::new(actions::CopyBlock))
+        .separator()
+        .menu("Move up", Box::new(actions::MoveBlockUp))
+        .menu("Move down", Box::new(actions::MoveBlockDown))
+        .separator()
+        .menu("Delete", Box::new(actions::DeleteBlock))
+}

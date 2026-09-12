@@ -1,6 +1,17 @@
 //! Actions and key bindings, named after the Tiptap commands they run.
 
-use gpui_kit::{App, KeyBinding, actions};
+use gpui_kit::{Action, App, KeyBinding, actions};
+use serde::Deserialize;
+
+use super::mark::{HighlightColor, TextColor};
+
+/// Applying one of the palette colors, dispatched by the color menus.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Action)]
+#[action(namespace = notion, no_json)]
+pub enum ApplyColor {
+    Text(TextColor),
+    Highlight(HighlightColor),
+}
 
 actions!(
     notion,
@@ -31,6 +42,7 @@ actions!(
         MoveBlockUp,
         MoveBlockDown,
         SelectBlock,
+        CopyBlock,
         Cancel,
     ]
 );
@@ -65,5 +77,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-up", MoveBlockUp, Some(CONTEXT)),
         KeyBinding::new("secondary-shift-down", MoveBlockDown, Some(CONTEXT)),
         KeyBinding::new("escape", Cancel, Some(CONTEXT)),
+        // The inputs bind redo per platform; the editor accepts both spellings.
+        KeyBinding::new(
+            "secondary-shift-z",
+            gpui_kit::component::input::Redo,
+            Some(CONTEXT),
+        ),
+        KeyBinding::new("secondary-y", gpui_kit::component::input::Redo, Some(CONTEXT)),
     ]);
 }

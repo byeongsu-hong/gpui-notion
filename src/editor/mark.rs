@@ -55,7 +55,7 @@ impl MarkKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum HighlightColor {
     Yellow,
     Green,
@@ -90,7 +90,7 @@ impl HighlightColor {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum TextColor {
     Default,
     Gray,
