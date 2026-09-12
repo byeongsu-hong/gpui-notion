@@ -85,6 +85,47 @@ const TYPOGRAPHY_RULES: &[(&str, &str)] = &[
 ];
 
 impl NotionEditor {
+    /// Convert a whole line that begins with a markdown prefix, the way a
+    /// pasted document's lines are read. Unlike typing, the rest of the line
+    /// is already there, so the rule only has to match its start.
+    pub(crate) fn apply_markdown_prefix(
+        &mut self,
+        id: BlockId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(ix) = self.index_of(id) else {
+            return false;
+        };
+        if !self.spec_at(ix, cx).caps().input_rules {
+            return false;
+        }
+        let text = self.blocks[ix].text.clone();
+
+        for (_, rule) in BlockRegistry::global(cx).input_rules() {
+            let pattern = rule.pattern.trim_end_matches('$');
+            let regex = regex_for(pattern);
+            let Some(caps) = regex.captures(&text) else {
+                continue;
+            };
+            let Some(whole) = caps.get(0) else { continue };
+            if whole.start() != 0 || whole.end() == 0 {
+                continue;
+            }
+            let Some((ty, attrs)) = (rule.build)(&caps) else {
+                continue;
+            };
+            if self.blocks[ix].ty == ty && self.blocks[ix].attrs == attrs {
+                continue;
+            }
+
+            self.edit_block_text(ix, 0..whole.end(), "", Some(0), window, cx);
+            self.set_block_type(id, ty, attrs, window, cx);
+            return true;
+        }
+        false
+    }
+
     /// Run the input rules after an edit. Returns true when one fired.
     pub(crate) fn run_input_rules(
         &mut self,

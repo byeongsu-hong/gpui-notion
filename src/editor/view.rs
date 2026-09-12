@@ -121,17 +121,72 @@ impl NotionEditor {
     /// A block input takes focus from a click without the editor hearing
     /// about it, so the window is the authority on which block is active and
     /// the field below is a cache of it, refreshed each frame.
-    pub(crate) fn refresh_focus(&mut self, window: &Window, cx: &App) {
+    pub(crate) fn refresh_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use gpui_kit::Focusable as _;
         let focused = self
             .blocks
             .iter()
             .find(|block| block.state.focus_handle(cx).is_focused(window))
             .map(|block| block.id);
-        if focused.is_some() && focused != self.focused {
-            self.focused = focused;
-            self.selected.clear();
+        if focused.is_none() || focused == self.focused {
+            return;
         }
+        self.focused = focused;
+        self.selected.clear();
+        self.sync_placeholders(window, cx);
+    }
+
+    /// Hint the block being written in, and any block that always hints.
+    ///
+    /// Tiptap's template shows "Write, type '/' for commands…" only in the
+    /// focused empty paragraph, while headings always name themselves.
+    pub(crate) fn sync_placeholders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let registry = BlockRegistry::global(cx);
+        let wanted: Vec<(usize, SharedString)> = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(ix, block)| {
+                let spec = registry.get(&block.ty);
+                let show = spec.placeholder_always() || self.focused == Some(block.id);
+                let text = if show {
+                    spec.placeholder(&block.attrs)
+                } else {
+                    SharedString::default()
+                };
+                (ix, text)
+            })
+            .collect();
+
+        for (ix, text) in wanted {
+            let state = self.blocks[ix].state.clone();
+            state.update(cx, |state, cx| state.set_placeholder(text, window, cx));
+        }
+    }
+
+    /// Focus a block and select a byte range inside it.
+    pub fn select_text_in_block(
+        &mut self,
+        ix: usize,
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(block) = self.blocks.get(ix) else {
+            return;
+        };
+        let (id, state) = (block.id, block.state.clone());
+        self.focus_block(id, Caret::At(range.start), window, cx);
+        state.update(cx, |state, cx| state.set_selected_range(range, cx));
+        cx.notify();
+    }
+
+    /// Put the caret in the last block of the document.
+    pub fn focus_last_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.blocks.last().map(|block| block.id) else {
+            return;
+        };
+        self.focus_block(id, Caret::End, window, cx);
     }
 
     /// Focus handle of the block at `ix`, for tests and hosts.
@@ -354,10 +409,57 @@ impl NotionEditor {
         }
 
         self.apply_decorations(id, cx);
+        if self.split_pasted_lines(id, window, cx) {
+            return;
+        }
         self.run_input_rules(id, window, cx);
         self.sync_slash_menu(window, cx);
         cx.emit(DocumentChanged);
         cx.notify();
+    }
+
+    /// Text arriving with newlines — a paste — becomes one block per line,
+    /// each line still subject to the markdown rules.
+    fn split_pasted_lines(
+        &mut self,
+        id: BlockId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(ix) = self.index_of(id) else {
+            return false;
+        };
+        if self.spec_at(ix, cx).caps().multiline || !self.blocks[ix].text.contains('\n') {
+            return false;
+        }
+
+        let text = self.blocks[ix].text.clone();
+        let mut lines = text.split('\n');
+        let head = lines.next().unwrap_or_default().to_string();
+        let rest: Vec<String> = lines.map(|line| line.to_string()).collect();
+
+        let caret = head.len();
+        self.set_block_text(ix, head, Some(caret), window, cx);
+        self.apply_markdown_prefix(id, window, cx);
+
+        let mut at = ix;
+        let mut last = id;
+        for line in rest {
+            at += 1;
+            let content = BlockContent {
+                ty: self.blocks[ix].ty.clone(),
+                attrs: self.blocks[ix].attrs.clone(),
+                text: line,
+                marks: Default::default(),
+                indent: self.blocks[ix].indent,
+            };
+            last = self.insert_block(at, content, window, cx);
+            self.apply_markdown_prefix(last, window, cx);
+        }
+        self.focus_block(last, Caret::End, window, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+        true
     }
 
     /// Push the block's marks into the input's decoration layer.

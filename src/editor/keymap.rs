@@ -7,8 +7,10 @@
 
 use gpui_kit::component::input::{
     Backspace, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight, MoveUp,
-    OutdentInline, Redo, Undo,
+    OutdentInline, Redo, SelectAll, Undo,
 };
+use gpui_kit::base::actions::{SelectDown, SelectUp};
+use gpui_kit::component::input::{Copy, Cut};
 use gpui_kit::{App, Context, Focusable as _, InteractiveElement, Window};
 
 use super::actions;
@@ -31,7 +33,7 @@ impl NotionEditor {
         Some((row, rows))
     }
 
-    fn caret_at_first_row(&self, ix: usize, cx: &App) -> bool {
+    pub(crate) fn caret_on_first_row(&self, ix: usize, cx: &App) -> bool {
         match self.caret_row(ix, cx) {
             Some((row, _)) => row == 0,
             // Before the first layout, fall back to the buffer line.
@@ -39,7 +41,7 @@ impl NotionEditor {
         }
     }
 
-    fn caret_at_last_row(&self, ix: usize, cx: &App) -> bool {
+    pub(crate) fn caret_on_last_row(&self, ix: usize, cx: &App) -> bool {
         match self.caret_row(ix, cx) {
             Some((row, rows)) => row + 1 >= rows,
             None => true,
@@ -70,6 +72,11 @@ impl NotionEditor {
             .capture_action(cx.listener(Self::on_tab))
             .capture_action(cx.listener(Self::on_shift_tab))
             .capture_action(cx.listener(Self::on_escape))
+            .capture_action(cx.listener(Self::on_select_up))
+            .capture_action(cx.listener(Self::on_select_down))
+            .capture_action(cx.listener(Self::on_select_all))
+            .capture_action(cx.listener(Self::on_copy))
+            .capture_action(cx.listener(Self::on_cut))
             .capture_action(cx.listener(|this, _: &Undo, window, cx| {
                 this.undo(window, cx);
                 cx.stop_propagation();
@@ -186,6 +193,11 @@ impl NotionEditor {
     // ------------------------------------------------------------- handlers
 
     fn on_enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.link_editor_is_open() {
+            self.apply_link_editor(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if self.slash_menu_is_open() {
             self.confirm_slash_item(window, cx);
             cx.stop_propagation();
@@ -218,6 +230,15 @@ impl NotionEditor {
     }
 
     fn on_backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
+        if self.has_block_selection() {
+            self.delete_selected_blocks(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         let (start, _, collapsed) = self.caret(ix, cx);
         if !collapsed || start != 0 {
@@ -228,6 +249,15 @@ impl NotionEditor {
     }
 
     fn on_delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
+        if self.has_block_selection() {
+            self.delete_selected_blocks(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         let (start, _, collapsed) = self.caret(ix, cx);
         if !collapsed || start != self.blocks[ix].text.len() {
@@ -238,13 +268,17 @@ impl NotionEditor {
     }
 
     fn on_move_up(&mut self, _: &MoveUp, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         if self.slash_menu_is_open() {
             self.move_slash_selection(-1, cx);
             cx.stop_propagation();
             return;
         }
         let Some(ix) = self.active_index() else { return };
-        if !self.caret_at_first_row(ix, cx) {
+        if !self.caret_on_first_row(ix, cx) {
             return;
         }
         if self.focus_sibling(ix, -1, Caret::End, window, cx) {
@@ -253,13 +287,17 @@ impl NotionEditor {
     }
 
     fn on_move_down(&mut self, _: &MoveDown, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         if self.slash_menu_is_open() {
             self.move_slash_selection(1, cx);
             cx.stop_propagation();
             return;
         }
         let Some(ix) = self.active_index() else { return };
-        if !self.caret_at_last_row(ix, cx) {
+        if !self.caret_on_last_row(ix, cx) {
             return;
         }
         if self.focus_sibling(ix, 1, Caret::Start, window, cx) {
@@ -268,6 +306,10 @@ impl NotionEditor {
     }
 
     fn on_move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         let (start, _, collapsed) = self.caret(ix, cx);
         if !collapsed || start != 0 {
@@ -279,6 +321,10 @@ impl NotionEditor {
     }
 
     fn on_move_right(&mut self, _: &MoveRight, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         let Some(ix) = self.active_index() else { return };
         let (start, _, collapsed) = self.caret(ix, cx);
         if !collapsed || start != self.blocks[ix].text.len() {
@@ -290,6 +336,10 @@ impl NotionEditor {
     }
 
     fn on_tab(&mut self, _: &IndentInline, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         if self.slash_menu_is_open() {
             self.move_slash_selection(1, cx);
             cx.stop_propagation();
@@ -305,6 +355,10 @@ impl NotionEditor {
     }
 
     fn on_shift_tab(&mut self, _: &OutdentInline, window: &mut Window, cx: &mut Context<Self>) {
+        // While a popover owns the keyboard, the document keeps its hands off.
+        if self.link_editor_is_open() {
+            return;
+        }
         if self.slash_menu_is_open() {
             self.move_slash_selection(-1, cx);
             cx.stop_propagation();
@@ -338,8 +392,7 @@ impl NotionEditor {
         // Escape with a caret selects the block as a node, as Notion does.
         let Some(id) = self.focused else { return };
         self.selected = vec![id];
-        self.focused = None;
-        self.focus_handle(cx).focus(window, cx);
+        self.take_focus_from_blocks(window, cx);
         cx.notify();
     }
 

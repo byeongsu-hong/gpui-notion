@@ -134,9 +134,8 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.focused = None;
         self.selected = vec![id];
-        self.focus_handle_for_editor().focus(window, cx);
+        self.take_focus_from_blocks(window, cx);
         cx.notify();
     }
 

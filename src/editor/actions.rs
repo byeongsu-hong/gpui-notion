@@ -1,5 +1,6 @@
 //! Actions and key bindings, named after the Tiptap commands they run.
 
+use gpui_kit::component::input;
 use gpui_kit::{Action, App, KeyBinding, actions};
 use serde::Deserialize;
 
@@ -43,7 +44,6 @@ actions!(
         MoveBlockDown,
         SelectBlock,
         CopyBlock,
-        Cancel,
     ]
 );
 
@@ -76,13 +76,19 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-backspace", DeleteBlock, Some(CONTEXT)),
         KeyBinding::new("secondary-shift-up", MoveBlockUp, Some(CONTEXT)),
         KeyBinding::new("secondary-shift-down", MoveBlockDown, Some(CONTEXT)),
-        KeyBinding::new("escape", Cancel, Some(CONTEXT)),
+        // With whole blocks selected the caret is out of the inputs, so the
+        // editing keys are bound here as well as in the `Input` context.
+        KeyBinding::new("escape", input::Escape, Some(CONTEXT)),
+        KeyBinding::new("backspace", input::Backspace, Some(CONTEXT)),
+        KeyBinding::new("delete", input::Delete, Some(CONTEXT)),
+        KeyBinding::new("secondary-c", input::Copy, Some(CONTEXT)),
+        KeyBinding::new("secondary-x", input::Cut, Some(CONTEXT)),
+        KeyBinding::new("up", input::MoveUp, Some(CONTEXT)),
+        KeyBinding::new("down", input::MoveDown, Some(CONTEXT)),
+        KeyBinding::new("shift-up", gpui_kit::base::actions::SelectUp, Some(CONTEXT)),
+        KeyBinding::new("shift-down", gpui_kit::base::actions::SelectDown, Some(CONTEXT)),
         // The inputs bind redo per platform; the editor accepts both spellings.
-        KeyBinding::new(
-            "secondary-shift-z",
-            gpui_kit::component::input::Redo,
-            Some(CONTEXT),
-        ),
-        KeyBinding::new("secondary-y", gpui_kit::component::input::Redo, Some(CONTEXT)),
+        KeyBinding::new("secondary-shift-z", input::Redo, Some(CONTEXT)),
+        KeyBinding::new("secondary-y", input::Redo, Some(CONTEXT)),
     ]);
 }

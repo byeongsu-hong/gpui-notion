@@ -16,6 +16,7 @@ pub mod history;
 pub mod input_rules;
 pub mod keymap;
 pub mod mark;
+pub mod selection;
 pub mod slash;
 pub mod style;
 pub mod toolbar;

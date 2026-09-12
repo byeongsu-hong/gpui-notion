@@ -1,4 +1,4 @@
-use gpui_kit::assets::Assets;
+use gpui_kit::assets::AllAssets;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 use gpui_notion::editor::block::{BlockAttrs, BlockContent, types};
@@ -52,8 +52,22 @@ fn demo_document() -> Vec<BlockContent> {
     ]
 }
 
+/// Development aid: `NOTION_DEMO=toolbar` or `NOTION_DEMO=slash` starts the
+/// window with that surface open, so it can be reviewed without driving the
+/// pointer.
+fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Context<NotionEditor>) {
+    match std::env::var("NOTION_DEMO").as_deref() {
+        Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
+        Ok("slash") => {
+            editor.focus_last_block(window, cx);
+            editor.open_slash_menu(window, cx);
+        }
+        _ => {}
+    }
+}
+
 fn main() {
-    let app = gpui_kit::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(AllAssets);
 
     app.run(move |cx| {
         gpui_kit::init(cx);
@@ -66,7 +80,11 @@ fn main() {
 
         cx.spawn(async move |cx| {
             cx.open_window(options, |window, cx| {
-                let view = cx.new(|cx| NotionEditor::with_content(demo_document(), window, cx));
+                let view = cx.new(|cx| {
+                    let mut editor = NotionEditor::with_content(demo_document(), window, cx);
+                    open_demo_state(&mut editor, window, cx);
+                    editor
+                });
                 cx.new(|cx| Root::new(view, window, cx))
             })
             .expect("failed to open window");

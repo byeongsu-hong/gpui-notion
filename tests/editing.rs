@@ -461,3 +461,107 @@ fn clicking_a_block_focuses_it(cx: &mut TestAppContext) {
     assert_eq!(handle_focused, Some(true), "the input has keyboard focus");
     assert!(focused.is_some(), "the editor tracks the clicked block");
 }
+
+#[gpui_kit::test]
+fn the_toolbar_appears_over_a_selection(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("select me", cx);
+    assert!(!cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+
+    harness.press("shift-home", cx);
+    assert!(cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.click("mark-bold", cx);
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        assert!(harness.editor.read(cx).content()[0]
+            .marks
+            .has(&gpui_notion::editor::MarkKind::Bold, &(0..9)));
+    });
+}
+
+#[gpui_kit::test]
+fn the_link_editor_sets_a_link_on_the_selection(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("tiptap", cx);
+    harness.press("shift-home", cx);
+    harness.press("secondary-shift-k", cx);
+    assert!(cx.update(|cx| harness.editor.read(cx).link_editor_is_open()));
+
+    harness.type_text("tiptap.dev", cx);
+    harness.press("enter", cx);
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert!(!editor.link_editor_is_open());
+        let block = &editor.content()[0];
+        let mark = block
+            .marks
+            .mark_at(
+                &gpui_notion::editor::MarkKind::Link(Default::default()),
+                0,
+            )
+            .expect("link mark");
+        match &mark.kind {
+            gpui_notion::editor::MarkKind::Link(href) => {
+                assert_eq!(href.as_ref(), "https://tiptap.dev")
+            }
+            other => panic!("unexpected mark {other:?}"),
+        }
+    });
+}
+
+#[gpui_kit::test]
+fn pasted_lines_become_blocks(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.ui(cx, |window, cx| {
+        window.input("# Title\n- one\n- two", cx);
+    });
+
+    assert_eq!(harness.texts(cx), vec!["Title", "one", "two"]);
+    assert_eq!(
+        harness.types(cx),
+        vec![types::HEADING, types::BULLET_LIST, types::BULLET_LIST]
+    );
+}
+
+#[gpui_kit::test]
+fn shift_down_selects_whole_blocks_and_backspace_removes_them(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+    harness.press("enter", cx);
+    harness.type_text("three", cx);
+    harness.press("up", cx);
+
+    harness.press("shift-down", cx);
+    assert_eq!(
+        cx.update(|cx| harness.editor.read(cx).selected_blocks().len()),
+        2
+    );
+
+    harness.press("backspace", cx);
+    assert_eq!(harness.texts(cx), vec!["one"]);
+}
+
+#[gpui_kit::test]
+fn select_all_escalates_from_block_to_document(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    harness.press("secondary-a", cx);
+    assert!(!cx.update(|cx| harness.editor.read(cx).has_block_selection()));
+
+    harness.press("secondary-a", cx);
+    assert_eq!(
+        cx.update(|cx| harness.editor.read(cx).selected_blocks().len()),
+        2
+    );
+}
