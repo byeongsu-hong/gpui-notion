@@ -128,10 +128,15 @@ impl NotionEditor {
 
     /// The selected blocks as markdown, which is what the clipboard gets.
     pub fn selected_markdown(&self, cx: &gpui_kit::App) -> String {
+        self.markdown_of(&self.selected_blocks(), cx)
+    }
+
+    /// Named blocks as markdown, in document order.
+    pub fn markdown_of(&self, ids: &[BlockId], cx: &gpui_kit::App) -> String {
         let registry = BlockRegistry::global(cx);
         self.blocks
             .iter()
-            .filter(|block| self.selected.contains(&block.id))
+            .filter(|block| ids.contains(&block.id))
             .map(|block| {
                 let indent = "    ".repeat(block.indent);
                 let prefix = match block.ty.as_ref() {

@@ -1437,3 +1437,36 @@ fn every_cell_of_a_row_is_as_tall_as_the_row(cx: &mut TestAppContext) {
         assert!(editor.cells_fit_their_text(id, cx));
     });
 }
+
+#[gpui_kit::test]
+fn a_table_in_a_loaded_document_comes_back_with_its_cells(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(editor::init);
+
+    let content = vec![
+        gpui_notion::editor::block::BlockContent::paragraph("above"),
+        editor::table_content(&[&["Name", "Role"], &["Ada", "Author"]]),
+    ];
+    let mut view = None;
+    let handle = cx.open_window(size(px(900.), px(700.)), |window, cx| {
+        let editor = cx.new(|cx| NotionEditor::with_content(content.clone(), window, cx));
+        view = Some(editor.clone());
+        Root::new(editor, window, cx)
+    });
+    let view = view.unwrap();
+    cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+        .unwrap();
+
+    cx.update(|cx| {
+        let editor = view.read(cx);
+        let id = editor.block_id_at(1).expect("the table block");
+        let grid = editor.grid(id).expect("its cells");
+        assert_eq!((grid.rows(), grid.columns()), (2, 2));
+        assert_eq!(grid.cell(CellPosition::new(0, 0)).unwrap().text(), "Name");
+        assert_eq!(grid.cell(CellPosition::new(1, 1)).unwrap().text(), "Author");
+        assert_eq!(
+            editor.markdown_of(&[id], cx),
+            "| Name | Role |\n| --- | --- |\n| Ada | Author |"
+        );
+    });
+}

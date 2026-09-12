@@ -46,6 +46,12 @@ fn demo_document() -> Vec<BlockContent> {
         BlockContent::new(types::TASK_LIST, "Ship it"),
         BlockContent::new(types::BLOCKQUOTE, "Type / anywhere to insert a block."),
         BlockContent::new(types::CODE_BLOCK, code).with_attrs(BlockAttrs::language("rust")),
+        BlockContent::new(types::HEADING, "Tables").with_attrs(BlockAttrs::level(2)),
+        editor::table_content(&[
+            &["Name", "Role", "Notes"],
+            &["Ada", "Author", "Wrote the first program"],
+            &["Grace", "Compiler", "Coined the bug"],
+        ]),
         BlockContent::new(types::HORIZONTAL_RULE, ""),
         BlockContent::new(types::CALLOUT, "Callouts hold a note worth keeping."),
         BlockContent::paragraph(""),
@@ -72,12 +78,6 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
                 .unwrap_or(0);
             editor.select_text_in_block(1, at..at, window, cx);
         }
-        Ok("table") => {
-            editor.show_gutter_always();
-            editor.select_text_in_block(1, 0..0, window, cx);
-            editor.insert_table(3, 3, window, cx);
-            fill_table(editor, window, cx);
-        }
         Ok("comment") => {
             editor.select_text_in_block(3, 0..12, window, cx);
             editor.add_comment(window, cx);
@@ -87,22 +87,6 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
             editor.open_slash_menu(window, cx);
         }
         _ => {}
-    }
-}
-
-/// Review aid: put words in the demo table so its rows can be judged.
-fn fill_table(editor: &mut NotionEditor, window: &mut Window, cx: &mut Context<NotionEditor>) {
-    let Some(id) = editor.block_id_at(2) else { return };
-    let words = [
-        ["Name", "Role", "Notes"],
-        ["Ada", "Author", "Wrote the first program"],
-        ["Grace", "Compiler", "Coined the bug"],
-    ];
-    for (row, cells) in words.iter().enumerate() {
-        for (column, text) in cells.iter().enumerate() {
-            let at = gpui_notion::editor::CellPosition::new(row, column);
-            editor.set_cell_text(id, at, *text, window, cx);
-        }
     }
 }
 

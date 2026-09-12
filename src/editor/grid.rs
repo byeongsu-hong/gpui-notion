@@ -10,7 +10,7 @@ use gpui_kit::{App, AppContext as _, Context, Entity, Focusable as _, Pixels, Su
 
 use super::fit::InputFit;
 
-use super::block::BlockId;
+use super::block::{BlockContent, BlockId};
 use super::view::NotionEditor;
 
 /// One cell: its own input plus a mirror of what is in it.
@@ -650,6 +650,22 @@ impl NotionEditor {
     pub(crate) fn grid_markdown(&self, block: BlockId) -> Option<String> {
         self.grids.get(&block).map(CellGrid::to_markdown)
     }
+}
+
+/// The block a document carries for a table of `rows`.
+///
+/// Cell text travels on the block like any other attribute, so a table needs
+/// nothing but [`BlockContent`] to be loaded, copied, undone or stored.
+pub fn table_content(rows: &[&[&str]]) -> BlockContent {
+    let cells = rows
+        .iter()
+        .map(|row| row.join(&CELL_SEPARATOR.to_string()))
+        .collect::<Vec<_>>()
+        .join(&ROW_SEPARATOR.to_string());
+
+    let mut attrs = super::block::BlockAttrs::default();
+    attrs.set_extra(CELLS_ATTRIBUTE, cells);
+    BlockContent::new(super::block::types::TABLE, String::new()).with_attrs(attrs)
 }
 
 fn encode_cells(grid: &CellGrid) -> String {

@@ -32,7 +32,7 @@ pub use block::{
 };
 pub use comments::{Comment, Thread, ThreadId};
 pub use fit::InputFit;
-pub use grid::{Cell, CellGrid, CellPosition};
+pub use grid::{Cell, CellGrid, CellPosition, table_content};
 pub use mark::{HighlightColor, Mark, MarkKind, MarkList, TextColor};
 pub use view::NotionEditor;
 

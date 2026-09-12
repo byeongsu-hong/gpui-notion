@@ -153,7 +153,7 @@ live beside it in `src/editor/mark.rs`.
 ```bash
 cargo test --test editing        # UI integration tests
 NOTION_DEMO=toolbar cargo run    # open the window with the selection toolbar shown
-NOTION_DEMO=comment cargo run    # … with a comment thread open (also: slash, table, gutter)
+NOTION_DEMO=comment cargo run    # … with a comment thread open (also: slash, toolbar, gutter)
 ```
 
 ## Notes and limits
