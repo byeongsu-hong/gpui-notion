@@ -193,7 +193,8 @@ impl NotionEditor {
         }
     }
 
-    /// Review aid: keep the gutter controls on screen for every block.
+    /// Review aid: keep the gutter controls on screen for every block, for
+    /// screenshots taken without a pointer. Off unless an application asks.
     pub fn show_gutter_always(&mut self) {
         self.always_show_gutter = true;
     }

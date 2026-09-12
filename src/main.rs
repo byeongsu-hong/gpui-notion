@@ -65,10 +65,14 @@ fn open_demo_state(editor: &mut NotionEditor, window: &mut Window, cx: &mut Cont
     if std::env::var("NOTION_DEMO").is_ok() {
         window.activate_window();
     }
+    // The gutter aid is its own switch, so it cannot ride along with a demo
+    // that was asked for something else.
+    if std::env::var("NOTION_GUTTER").as_deref() == Ok("always") {
+        editor.show_gutter_always();
+    }
     match std::env::var("NOTION_DEMO").as_deref() {
         Ok("toolbar") => editor.select_text_in_block(3, 0..12, window, cx),
         Ok("focus") => editor.select_text_in_block(3, 5..5, window, cx),
-        Ok("gutter") => editor.show_gutter_always(),
         Ok("caret") => {
             // Review aid: put the caret at a byte offset inside block 1, so
             // two runs can be compared pixel by pixel.
