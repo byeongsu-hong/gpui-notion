@@ -21,6 +21,8 @@ use super::block::{
     Block, BlockAttrs, BlockContext, BlockContent, BlockId, BlockLayout, BlockRegistry, BlockSpec,
     BlockType, types,
 };
+use gpui_kit::TestSupportExt as _;
+
 use super::gutter::DraggedBlock;
 use super::mark::{MarkKind, diff_edit};
 use super::style;
@@ -106,6 +108,11 @@ impl NotionEditor {
         self.focused
             .or_else(|| self.selected.first().copied())
             .or_else(|| self.blocks.first().map(|b| b.id))
+    }
+
+    /// The block whose input holds focus, if any.
+    pub fn focused_id(&self) -> Option<BlockId> {
+        self.focused
     }
 
     pub fn active_index(&self) -> Option<usize> {
@@ -291,13 +298,24 @@ impl NotionEditor {
         let old_text = std::mem::replace(&mut self.blocks[ix].text, new_text.clone());
 
         if let Some(edit) = diff_edit(&old_text, &new_text) {
+            // What the new text is formatted as: the marks armed at the caret
+            // if any, otherwise the marks that were live where it was typed.
+            let at = edit.range.start..edit.range.start;
+            let inherited = self.blocks[ix]
+                .marks
+                .active(&at)
+                .into_iter()
+                .filter(MarkKind::is_inclusive)
+                .collect();
+            let applied: Vec<MarkKind> = self.blocks[ix]
+                .stored_marks
+                .take()
+                .unwrap_or(inherited);
+
             self.blocks[ix].marks.remap(&edit);
-            // Marks armed at an empty caret apply to what was just typed.
-            if let Some(stored) = self.blocks[ix].stored_marks.take()
-                && edit.new_len > 0
-            {
+            if edit.new_len > 0 {
                 let range = edit.range.start..edit.range.start + edit.new_len;
-                for kind in stored {
+                for kind in applied {
                     self.blocks[ix].marks.add(kind, range.clone());
                 }
             }
@@ -547,12 +565,16 @@ impl NotionEditor {
 
         div()
             .id(("block", id.0 as usize))
+            .test_support()
             .group(group_name(id))
             .relative()
             .w_full()
             .mt(margin_top)
             .mb(layout.margin_bottom)
-            .pl(style::INDENT_WIDTH * indent as f32)
+            // The row reaches into the left margin so hovering it covers the
+            // gutter controls, which live in that reach.
+            .ml(-style::GUTTER_CONTROLS_WIDTH)
+            .pl(style::GUTTER_CONTROLS_WIDTH + style::INDENT_WIDTH * indent as f32)
             .when(selected, |this| {
                 this.rounded(px(4.)).bg(cx.theme().selection.opacity(0.4))
             })
@@ -665,6 +687,8 @@ impl Render for NotionEditor {
             .collect();
 
         let root = div()
+            .id("editor")
+            .test_support()
             .key_context(actions::CONTEXT)
             .track_focus(&self.focus_handle)
             .size_full()

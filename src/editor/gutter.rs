@@ -7,6 +7,8 @@ use gpui_kit::{
     ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
+use gpui_kit::TestSupportExt as _;
+
 use super::block::BlockId;
 use super::style;
 use super::ui;
@@ -67,7 +69,7 @@ impl NotionEditor {
 
         div()
             .absolute()
-            .left(-style::GUTTER_CONTROLS_WIDTH)
+            .left(px(4.))
             .top(top)
             .h(px(24.))
             .flex()
@@ -77,6 +79,7 @@ impl NotionEditor {
             .group_hover(group_name(id), |this| this.visible())
             .child(
                 ui::toolbar_button(("insert", id.0 as usize), false, cx)
+                    .test_support()
                     .size(px(24.))
                     .child(ui::icon("plus", px(16.), cx.theme().muted_foreground))
                     .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new("Insert block").build(window, cx))
@@ -86,6 +89,7 @@ impl NotionEditor {
             )
             .child(
                 ui::toolbar_button(("grip", id.0 as usize), false, cx)
+                    .test_support()
                     .size(px(24.))
                     .child(ui::icon(
                         "grip-vertical",

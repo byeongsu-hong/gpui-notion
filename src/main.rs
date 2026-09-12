@@ -1,6 +1,5 @@
-mod editor;
-
-use editor::NotionEditor;
+use gpui_notion::editor;
+use gpui_notion::editor::NotionEditor;
 use gpui_kit::assets::Assets;
 use gpui_kit::component::Root;
 use gpui_kit::*;

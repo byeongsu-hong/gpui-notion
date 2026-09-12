@@ -118,9 +118,6 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.blocks[ix].ty != types::PARAGRAPH {
-            return false;
-        }
         let head = &text[..caret];
         let rules = BlockRegistry::global(cx).input_rules();
 
@@ -136,6 +133,11 @@ impl NotionEditor {
             let Some((ty, attrs)) = (rule.build)(&caps) else {
                 continue;
             };
+            // A rule never re-fires on the node it produces, so typing `- `
+            // inside a bullet item leaves the dashes alone.
+            if self.blocks[ix].ty == ty && self.blocks[ix].attrs == attrs {
+                continue;
+            }
 
             let consumed = caps.get(0).map(|m| m.len()).unwrap_or(0);
             let id = self.blocks[ix].id;

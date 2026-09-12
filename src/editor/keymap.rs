@@ -9,7 +9,7 @@ use gpui_kit::component::input::{
     Backspace, Delete, Enter, Escape, IndentInline, MoveDown, MoveLeft, MoveRight, MoveUp,
     OutdentInline,
 };
-use gpui_kit::{App, Context, Div, Focusable as _, InteractiveElement as _, Window};
+use gpui_kit::{App, Context, Focusable as _, InteractiveElement, Window};
 
 use super::actions;
 use super::block::types;
@@ -53,7 +53,11 @@ impl NotionEditor {
     }
 
     /// Attach every editor-level key handler to the root element.
-    pub(crate) fn with_key_handlers(&self, el: Div, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn with_key_handlers<E: InteractiveElement>(
+        &self,
+        el: E,
+        cx: &mut Context<Self>,
+    ) -> E {
         el
             // ------------------------------------------------- structural keys
             .capture_action(cx.listener(Self::on_enter))

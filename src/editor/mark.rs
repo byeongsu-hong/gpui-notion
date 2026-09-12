@@ -162,14 +162,18 @@ impl Edit {
     }
 
     /// Map a pre-edit offset onto the post-edit text.
+    ///
+    /// Inserted text never joins a mark by itself: a mark's start moves right
+    /// past it and its end stays put. Which marks the new text actually takes
+    /// is decided separately, from the marks active at the caret, so an input
+    /// rule can say "plain from here" without fighting the remapping.
     fn map(&self, offset: usize, bias_right: bool) -> usize {
-        if offset <= self.range.start {
+        if offset < self.range.start {
             return offset;
         }
-        if offset >= self.range.end {
+        if offset > self.range.end {
             return offset - (self.range.end - self.range.start) + self.new_len;
         }
-        // Inside the replaced span: collapse to one of its edges.
         if bias_right {
             self.range.start + self.new_len
         } else {
@@ -304,8 +308,8 @@ impl MarkList {
     /// Move marks across a text edit.
     pub fn remap(&mut self, edit: &Edit) {
         for mark in &mut self.marks {
-            let start = edit.map(mark.range.start, false);
-            let end = edit.map(mark.range.end, true);
+            let start = edit.map(mark.range.start, true);
+            let end = edit.map(mark.range.end, false);
             mark.range = start..end.max(start);
         }
         self.marks.retain(|m| !m.range.is_empty());
@@ -508,10 +512,10 @@ mod tests {
     }
 
     #[test]
-    fn typing_at_the_end_of_a_mark_extends_it() {
+    fn remapping_alone_does_not_extend_a_mark() {
         let mut marks = MarkList::from_marks(vec![bold(0..5)]);
         marks.remap(&Edit::new(5..5, 1));
-        assert_eq!(marks.iter().next().unwrap().range, 0..6);
+        assert_eq!(marks.iter().next().unwrap().range, 0..5);
     }
 
     #[test]
