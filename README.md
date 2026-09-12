@@ -162,6 +162,13 @@ The closure is kept and re-applied on top of freshly derived values whenever the
 `gpui-kit` theme changes, so a customized editor stays customized across light, dark
 and every base size.
 
+The document ships in the template's own palette: `editor::theme::apply_template_palette`
+installs [`assets/themes/notion.json`](assets/themes/notion.json) as the theme's light
+and dark configurations — page, border, selection, caret and the brand link colour — and
+sets the Notion text and highlight palettes and the gray-ramp code surfaces alongside it.
+Because it becomes the theme, switching appearance keeps it. `NOTION_PALETTE=kit` starts
+in the plain `gpui-kit` palette instead.
+
 Appearance and zoom are the application's to own; `editor::theme::init_appearance_actions`
 installs a ready-made set (`Mod+Shift+L` to switch palette, `Mod+=`, `Mod+-`, `Mod+0`
 to change the base size), and the demo binary also takes `NOTION_THEME=dark` and

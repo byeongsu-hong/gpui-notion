@@ -122,6 +122,14 @@ fn main() {
         editor::init(cx);
         editor::theme::init_appearance_actions(cx);
 
+        // The document wears the template's own palette unless the reader
+        // asks for the framework's: `NOTION_PALETTE=kit`.
+        if std::env::var("NOTION_PALETTE").as_deref() != Ok("kit")
+            && let Err(error) = editor::theme::apply_template_palette(cx)
+        {
+            eprintln!("the template palette could not be loaded: {error}");
+        }
+
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1100.), px(860.)), cx)),
             ..Default::default()

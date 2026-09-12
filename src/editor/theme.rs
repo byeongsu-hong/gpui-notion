@@ -461,3 +461,87 @@ pub fn zoom(step: isize, cx: &mut App) {
     let next = (nearest + step).clamp(0, ZOOM_STEPS.len() as isize - 1) as usize;
     set_base_size(ZOOM_STEPS[next], cx);
 }
+
+// ----------------------------------------------------------- template palette
+
+/// The Notion-like template's own palette, as a `gpui-kit` theme set.
+const TEMPLATE_THEMES: &str = include_str!("../../assets/themes/notion.json");
+
+/// Set the editor's document colours to the ones the Tiptap Notion-like
+/// template uses, for both appearances.
+///
+/// The palette is installed as the theme's light and dark configurations, so
+/// switching appearance keeps it — it is the application's theme from then on,
+/// not a coat of paint over the framework's. The mark palettes, which are the
+/// editor's own, are set alongside it.
+pub fn apply_template_palette(cx: &mut App) -> anyhow::Result<()> {
+    use gpui_kit::component::ThemeMode;
+    use std::rc::Rc as StdRc;
+
+    let set: gpui_kit::component::ThemeSet = serde_json::from_str(TEMPLATE_THEMES)?;
+    let (mut light, mut dark) = (None, None);
+    for config in set.themes {
+        if config.mode.is_dark() {
+            dark = Some(StdRc::new(config));
+        } else {
+            light = Some(StdRc::new(config));
+        }
+    }
+    let (Some(light), Some(dark)) = (light, dark) else {
+        anyhow::bail!("the template palette needs a light and a dark theme");
+    };
+
+    let mode = cx.theme().mode;
+    {
+        let theme = Theme::global_mut(cx);
+        theme.light_theme = light;
+        theme.dark_theme = dark;
+    }
+    let size = cx.theme().font_size;
+    Theme::change(mode, None, cx);
+    cx.global_mut::<Theme>().font_size = size;
+
+    EditorTheme::customize(cx, |theme, kit| {
+        let dark = kit.mode == ThemeMode::Dark;
+        // Notion's own text and highlight palettes, which the template ships
+        // verbatim; see docs/research/tiptap-notion-spec.md §2.
+        theme.text_palette = TextPalette {
+            gray: hsl_of(if dark { 0x9c9c9c } else { 0x787673 }),
+            brown: hsl_of(if dark { 0xb9856e } else { 0x9d6a53 }),
+            orange: hsl_of(if dark { 0xd9730d } else { 0xc77d48 }),
+            yellow: hsl_of(if dark { 0xca994e } else { 0xca922f }),
+            green: hsl_of(if dark { 0x519e71 } else { 0x448361 }),
+            blue: hsl_of(if dark { 0x3699d3 } else { 0x327da9 }),
+            purple: hsl_of(if dark { 0x9e69d3 } else { 0x8f64af }),
+            pink: hsl_of(if dark { 0xd15796 } else { 0xc24c8b }),
+            red: hsl_of(if dark { 0xdf5553 } else { 0xd34a45 }),
+        };
+        theme.highlight_palette = HighlightPalette {
+            yellow: hsl_of(if dark { 0x6b6524 } else { 0xfef9c3 }),
+            green: hsl_of(if dark { 0x509568 } else { 0xdcfce7 }),
+            blue: hsl_of(if dark { 0x6e92aa } else { 0xe0f2fe }),
+            purple: hsl_of(if dark { 0x583e74 } else { 0xf3e8ff }),
+            pink: hsl_of(if dark { 0x4e2c3c } else { 0xfcf1f6 }),
+            red: hsl_of(if dark { 0x743e42 } else { 0xffe4e6 }),
+            gray: hsl_of(if dark { 0x2f2f2f } else { 0xf8f8f7 }),
+        };
+        // Inline code and the code block come off the template's gray ramps.
+        theme.code_background = hsla_of(if dark { 0xe7e7f3 } else { 0x0f1624 }, if dark { 0.07 } else { 0.05 });
+        theme.code_foreground = hsla_of(if dark { 0xfbfbfe } else { 0x23252a }, if dark { 0.75 } else { 0.87 });
+        theme.code_block_background = hsla_of(
+            if dark { 0xe8e8fd } else { 0x383838 },
+            if dark { 0.05 } else { 0.04 },
+        );
+        theme.callout_background = theme.code_block_background;
+        theme.table_header_background = theme.code_block_background;
+        theme.quote_bar = kit.foreground.opacity(0.85);
+    });
+    Ok(())
+}
+
+/// A palette value with an alpha, for the template's translucent ramps.
+fn hsla_of(rgb: u32, alpha: f32) -> Hsla {
+    let mut color: Hsla = gpui_kit::rgb(rgb).into();
+    color.a = alpha;
+    color
+}

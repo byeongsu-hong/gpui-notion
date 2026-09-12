@@ -2001,3 +2001,37 @@ fn the_zoom_keys_resize_the_document(cx: &mut TestAppContext) {
         assert_eq!(f32::from(EditorTheme::global(cx).rem), 20.);
     });
 }
+
+#[gpui_kit::test]
+fn the_template_palette_survives_an_appearance_change(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    cx.update(|cx| {
+        editor::theme::apply_template_palette(cx).expect("the template palette loaded")
+    });
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+
+    cx.update(|cx| {
+        let kit = Theme::global(cx);
+        assert!(!kit.mode.is_dark());
+        assert_eq!(kit.background, gpui_kit::rgb(0xffffff).into(), "page");
+        assert_eq!(
+            EditorTheme::global(cx).highlight_fill(Some(gpui_notion::editor::HighlightColor::Yellow)),
+            gpui_kit::rgb(0xfef9c3).into(),
+            "the template's yellow highlight"
+        );
+    });
+
+    cx.update(editor::theme::toggle_appearance);
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+
+    cx.update(|cx| {
+        let kit = Theme::global(cx);
+        assert!(kit.mode.is_dark());
+        assert_eq!(kit.background, gpui_kit::rgb(0x0e0e11).into(), "dark page");
+        assert_eq!(
+            EditorTheme::global(cx).highlight_fill(Some(gpui_notion::editor::HighlightColor::Yellow)),
+            gpui_kit::rgb(0x6b6524).into(),
+            "the template's dark yellow highlight"
+        );
+    });
+}

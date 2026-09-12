@@ -1,5 +1,11 @@
 # Parity grading against the Tiptap Notion-like editor template
 
+> **Since this was graded**, `style.rs` has become
+> [`theme.rs`](../src/editor/theme.rs): every metric is a multiple of the theme's base
+> font size and every colour is a token, so the page, gutter and typography numbers
+> quoted below are now defaults rather than constants. Item 39's palettes are the
+> template's own (see `assets/themes/notion.json` and `apply_template_palette`).
+
 Graded against `docs/research/tiptap-notion-spec.md` §7 (42 items), §1–§6 for detail.
 
 **Basis.** Re-graded against `git` HEAD `6a08ddcd32d070f088b2bd717fb67414783c7aa4`
