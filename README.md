@@ -88,8 +88,10 @@ impl BlockSpec for Warning {
     fn type_name(&self) -> &'static str { "warning" }
     fn label(&self, _: &BlockAttrs) -> SharedString { "Warning".into() }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
-        BlockLayout { inner_padding: px(16.), ..Default::default() }
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
+        // Sizes come from the tokens, so the block scales and re-themes with
+        // the rest of the document.
+        BlockLayout { inner_padding: theme.block_padding, ..BlockLayout::new(theme) }
     }
 
     fn input_rules(&self) -> Vec<BlockInputRule> {
@@ -125,6 +127,46 @@ A spec can also supply `render_leading` (the bullet, number or checkbox column),
 and `split_into` (what Enter creates). Asking for `BlockCaps::grid()` gets the block a
 `CellGrid` of child text areas, which is all a table is.
 
+## Theming
+
+Nothing in the editor states a colour or a size at the point it is drawn. Both come
+from [`EditorTheme`](src/editor/theme.rs), the editor's own token layer, which is
+derived from the `gpui-kit` theme in force and derived again whenever that changes.
+
+- **Colours** are semantic roles from `cx.theme()` — `foreground`, `muted`, `border`,
+  `primary`, `selection`, `popover` — plus the few the framework has no name for: the
+  wash behind commented text, the code and callout surfaces, and the palettes a
+  `highlight` or `textStyle` mark picks from. Those live in `EditorTheme` as fields,
+  not as literals at a call site. Floating surfaces use the framework's own popover
+  treatment, so the slash menu and the toolbar cannot drift from the menus beside them.
+- **Sizes** are multiples of the theme's base font size — the window's `rem`. The page
+  column, its padding, the gutter, the indent per level, the marker column, block
+  margins, the heading scale, the table's text and every popover in the editor all
+  move together when that base changes: the document zooms as one system instead of
+  growing text inside fixed boxes. Radii come from the theme's radius tiers, so a
+  squared-off theme squares the editor off too.
+- **Nothing assumes a physical number** except the two that are physical: a one-pixel
+  hairline and the device-pixel slack an input measurement needs.
+
+An application changes the whole editor from one place:
+
+```rust
+EditorTheme::customize(cx, |theme, kit| {
+    theme.page_width = theme.rems(52.);          // a wider column
+    theme.comment_fill = kit.warning.opacity(0.2);
+    theme.headings[0].margin_above = 2.0;        // less air over an H1
+});
+```
+
+The closure is kept and re-applied on top of freshly derived values whenever the
+`gpui-kit` theme changes, so a customized editor stays customized across light, dark
+and every base size.
+
+Appearance and zoom are the application's to own; `editor::theme::init_appearance_actions`
+installs a ready-made set (`Mod+Shift+L` to switch palette, `Mod+=`, `Mod+-`, `Mod+0`
+to change the base size), and the demo binary also takes `NOTION_THEME=dark` and
+`NOTION_FONT_SIZE=<px>`.
+
 ## Keyboard
 
 | Keys | Command |
@@ -147,6 +189,7 @@ and `split_into` (what Enter creates). Asking for `BlockCaps::grid()` gets the b
 | `Mod+Shift+E` / `Mod+Shift+2` / `Mod+Shift+I` | emoji menu / mention menu / image |
 | `Tab` / `Shift+Tab` in a table | next / previous cell; Tab in the last cell adds a row |
 | `Mod+/` | open the block menu · `Escape` closes menus, then selects the block |
+| `Mod+Shift+L` · `Mod+=` `Mod+-` `Mod+0` | switch palette · zoom the document (opt-in, see Theming) |
 
 ## Testing
 

@@ -13,7 +13,7 @@ use gpui_kit::{
 use super::actions;
 use super::block::{BlockId, BlockRegistry};
 use super::mark::{HighlightColor, MarkKind, TextColor};
-use super::style;
+use super::theme::ActiveEditorTheme;
 use super::ui::{self, Lucide};
 
 /// Stacking order of the editor's own overlays.
@@ -83,8 +83,8 @@ impl super::view::NotionEditor {
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(2.))
-            .p(px(4.))
+            .gap(cx.editor_theme().rems(0.125))
+            .p(cx.editor_theme().rems(0.25))
             .child(self.render_turn_into(&focus, cx))
             .child(separator(cx))
             .child(self.mark_button("bold", "Bold", MarkKind::Bold, cx))
@@ -116,7 +116,7 @@ impl super::view::NotionEditor {
         Some(
             deferred(
                 gpui_kit::base::Positioner::corner(Anchor::BottomLeft, position)
-                    .margin(px(8.))
+                    .margin(cx.editor_theme().rems(0.5))
                     .occlude()
                     .child(toolbar),
             )
@@ -141,12 +141,12 @@ impl super::view::NotionEditor {
             let origin = self
                 .block_text_origin(id, cx)
                 .or_else(|| self.block_bounds(id).map(|bounds| bounds.origin))?;
-            return Some(origin + Point::new(px(0.), px(-8.)));
+            return Some(origin + Point::new(px(0.), -cx.editor_theme().rems(0.5)));
         }
         let (id, range) = self.selection(cx)?;
         let ix = self.index_of(id)?;
         let bounds = self.blocks[ix].state.read(cx).range_to_bounds(&range)?;
-        Some(bounds.origin + Point::new(px(0.), px(-8.)))
+        Some(bounds.origin + Point::new(px(0.), -cx.editor_theme().rems(0.5)))
     }
 
     fn mark_button(
@@ -243,7 +243,10 @@ impl super::view::NotionEditor {
                     menu = menu.menu_element(Box::new(actions::ApplyColor::Text(color)), move |_, cx| {
                         swatch_row(
                             color.label(),
-                            style::text_color_value(color, cx).unwrap_or(cx.theme().foreground),
+                            cx.editor_theme()
+                                .text_color(color)
+                                .unwrap_or(cx.theme().foreground),
+                            cx,
                         )
                     });
                 }
@@ -251,7 +254,11 @@ impl super::view::NotionEditor {
                 for color in HighlightColor::ALL {
                     menu = menu
                         .menu_element(Box::new(actions::ApplyColor::Highlight(color)), move |_, cx| {
-                            swatch_row(color.label(), style::highlight_fill(Some(color), cx))
+                            swatch_row(
+                                color.label(),
+                                cx.editor_theme().highlight_fill(Some(color)),
+                                cx,
+                            )
                         });
                 }
                 menu
@@ -354,16 +361,21 @@ impl super::view::NotionEditor {
             .state
             .read(cx)
             .range_to_bounds(&editor.range)?;
-        let position = bounds.origin + Point::new(px(0.), px(-8.));
+        let theme = cx.editor_theme().clone();
+        let position = bounds.origin + Point::new(px(0.), -theme.rems(0.5));
         let has_link = !editor.input.read(cx).value().is_empty();
 
         let card = ui::popover_surface(cx)
             .flex()
             .flex_row()
             .items_center()
-            .gap(px(4.))
-            .p(px(4.))
-            .child(Input::new(&editor.input).id("link-input").w(px(260.)))
+            .gap(theme.rems(0.25))
+            .p(theme.rems(0.25))
+            .child(
+                Input::new(&editor.input)
+                    .id("link-input")
+                    .w(theme.rems(16.25)),
+            )
             .child(
                 Button::new("apply-link")
                     .ghost()
@@ -397,7 +409,7 @@ impl super::view::NotionEditor {
         Some(
             deferred(
                 gpui_kit::base::Positioner::corner(Anchor::BottomLeft, position)
-                    .margin(px(8.))
+                    .margin(theme.rems(0.5))
                     .occlude()
                     .child(card),
             )
@@ -408,18 +420,27 @@ impl super::view::NotionEditor {
 }
 
 fn separator(cx: &App) -> impl IntoElement {
+    let theme = cx.editor_theme();
     div()
+        // A hairline is a device boundary, not a spacing value: it stays one
+        // pixel however the document is scaled.
         .w(px(1.))
-        .h(px(20.))
-        .mx(px(2.))
+        .h(theme.rems(1.25))
+        .mx(theme.rems(0.125))
         .bg(cx.theme().border)
 }
 
 /// A palette entry: the color, then its name.
-fn swatch_row(label: &'static str, color: gpui_kit::Hsla) -> impl IntoElement {
+fn swatch_row(label: &'static str, color: gpui_kit::Hsla, cx: &App) -> gpui_kit::Div {
+    let theme = cx.editor_theme();
     h_flex()
-        .gap(px(8.))
-        .child(div().size(px(14.)).rounded(px(4.)).bg(color))
+        .gap(theme.rems(0.5))
+        .child(
+            div()
+                .size(theme.rems(0.875))
+                .rounded(theme.radius_sm)
+                .bg(color),
+        )
         .child(label)
 }
 

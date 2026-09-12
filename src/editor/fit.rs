@@ -15,7 +15,7 @@
 use gpui_kit::component::input::EditorState;
 use gpui_kit::{App, Context, Entity, Pixels, Window, px};
 
-use super::style;
+use super::theme::{EditorTheme, INPUT_INSET_SLACK};
 
 /// A text area whose height the document decides.
 ///
@@ -46,16 +46,15 @@ pub struct InputFit {
     lead: gpui_kit::Point<Pixels>,
 }
 
-impl Default for InputFit {
-    fn default() -> Self {
+impl InputFit {
+    /// What to assume before an input has laid out and said otherwise.
+    pub fn new(theme: &EditorTheme) -> Self {
         Self {
-            inset: style::INPUT_PAD_Y * 2.,
-            lead: gpui_kit::point(style::INPUT_PAD_X, style::INPUT_PAD_Y),
+            inset: theme.input_pad_y * 2.,
+            lead: gpui_kit::point(theme.input_pad_x, theme.input_pad_y),
         }
     }
-}
 
-impl InputFit {
     /// The height to hand an input that has to show `text` pixels of text.
     pub fn height(&self, text: Pixels) -> Pixels {
         text + self.inset
@@ -74,13 +73,18 @@ impl InputFit {
 
     /// Learn where the input actually put its first glyph: `slot` is the
     /// corner the layout handed the block, `glyph` is where the text starts.
-    pub fn observe_lead(&mut self, slot: gpui_kit::Point<Pixels>, glyph: gpui_kit::Point<Pixels>) {
+    pub fn observe_lead(
+        &mut self,
+        slot: gpui_kit::Point<Pixels>,
+        glyph: gpui_kit::Point<Pixels>,
+        theme: &EditorTheme,
+    ) {
         let error = glyph - slot;
         if error.x.abs() > px(0.05) {
-            self.lead.x = (self.lead.x + error.x).clamp(px(0.), style::MAX_INPUT_INSET);
+            self.lead.x = (self.lead.x + error.x).clamp(px(0.), theme.max_input_inset);
         }
         if error.y.abs() > px(0.05) {
-            self.lead.y = (self.lead.y + error.y).clamp(px(0.), style::MAX_INPUT_INSET);
+            self.lead.y = (self.lead.y + error.y).clamp(px(0.), theme.max_input_inset);
         }
     }
 
@@ -90,17 +94,17 @@ impl InputFit {
     /// pixels, and following that snapping in both directions never settles.
     /// A text area with far more room than its text asks for means the block
     /// changed shape underneath, and starts the measurement again.
-    pub fn observe(&mut self, text: Pixels, text_area: Pixels) {
+    pub fn observe(&mut self, text: Pixels, text_area: Pixels, theme: &EditorTheme) {
         if text_area <= px(0.) {
             return;
         }
         if text_area < text {
             // A device pixel of slack on top of the shortfall, so the next
             // frame lands over the line rather than on it.
-            let widened = self.inset + (text - text_area) + style::INPUT_INSET_SLACK;
-            self.inset = widened.min(style::MAX_INPUT_INSET);
-        } else if text_area - text > style::INPUT_INSET_SLACK * 4. {
-            *self = Self::default();
+            let widened = self.inset + (text - text_area) + INPUT_INSET_SLACK;
+            self.inset = widened.min(theme.max_input_inset);
+        } else if text_area - text > INPUT_INSET_SLACK * 4. {
+            *self = Self::new(theme);
         }
     }
 

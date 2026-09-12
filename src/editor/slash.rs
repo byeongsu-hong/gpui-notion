@@ -14,6 +14,7 @@ use super::block::{BlockId, BlockRegistry};
 use super::mark::MarkKind;
 use super::suggestion::{EMOJI, Emoji, Mention, Trigger, default_mentions, matches};
 use super::toolbar::OVERLAY_PRIORITY;
+use super::theme::ActiveEditorTheme;
 use super::ui;
 use super::view::NotionEditor;
 
@@ -333,7 +334,8 @@ impl NotionEditor {
         let ix = self.index_of(menu.block)?;
         let state = self.blocks[ix].state.read(cx);
         let (caret, line_height) = state.cursor_layout()?;
-        let position = caret.origin + Point::new(px(0.), line_height + px(6.));
+        let theme = cx.editor_theme().clone();
+        let position = caret.origin + Point::new(px(0.), line_height + theme.rems(0.375));
 
         let items = self.suggestion_items(cx);
         if items.is_empty() {
@@ -348,8 +350,8 @@ impl NotionEditor {
                     rows.push(
                         div()
                             .h(px(1.))
-                            .my(px(4.))
-                            .mx(px(4.))
+                            .my(theme.rems(0.25))
+                            .mx(theme.rems(0.25))
                             .bg(cx.theme().border)
                             .into_any_element(),
                     );
@@ -357,10 +359,10 @@ impl NotionEditor {
                 group = item.group();
                 rows.push(
                     div()
-                        .px(px(8.))
-                        .pt(px(8.))
-                        .pb(px(4.))
-                        .text_size(px(11.))
+                        .px(theme.rems(0.5))
+                        .pt(theme.rems(0.5))
+                        .pb(theme.rems(0.25))
+                        .text_size(theme.ui_small_text_size)
                         .text_color(cx.theme().muted_foreground)
                         .child(group.to_string())
                         .into_any_element(),
@@ -371,7 +373,7 @@ impl NotionEditor {
             let leading = match item {
                 SuggestionItem::Block { icon, .. } => ui::icon(
                     icon,
-                    px(16.),
+                    theme.text_size,
                     if selected {
                         cx.theme().accent_foreground
                     } else {
@@ -380,11 +382,11 @@ impl NotionEditor {
                 )
                 .into_any_element(),
                 SuggestionItem::Emoji(emoji) => div()
-                    .w(px(16.))
+                    .w(theme.text_size)
                     .child(emoji.character.to_string())
                     .into_any_element(),
                 SuggestionItem::Mention(mention) => div()
-                    .w(px(16.))
+                    .w(theme.text_size)
                     .text_color(cx.theme().muted_foreground)
                     .child(
                         mention
@@ -412,12 +414,12 @@ impl NotionEditor {
         Some(
             deferred(
                 gpui_kit::base::Positioner::corner(Anchor::TopLeft, position)
-                    .margin(px(8.))
+                    .margin(theme.rems(0.5))
                     .occlude()
                     .child(
                         ui::popover_surface(cx)
-                            .w(px(320.))
-                            .max_h(px(360.))
+                            .w(theme.rems(20.))
+                            .max_h(theme.rems(22.5))
                             .id("suggestion-menu")
                             .overflow_y_scroll()
                             .children(rows),

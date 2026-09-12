@@ -26,7 +26,7 @@ use gpui_kit::TestSupportExt as _;
 
 use super::gutter::DraggedBlock;
 use super::mark::{MarkKind, diff_edit};
-use super::style;
+use super::theme::ActiveEditorTheme;
 
 /// Emitted when the document changes, so a host can persist it.
 pub struct DocumentChanged;
@@ -91,7 +91,7 @@ impl NotionEditor {
             open_thread: None,
             comment_draft: None,
             selected: Vec::new(),
-            wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
+            wrap_width: cx.editor_theme().page_width - cx.editor_theme().page_padding * 2.,
             suggestion: None,
             mentions: super::suggestion::default_mentions(),
             drop_target: None,
@@ -461,7 +461,7 @@ impl NotionEditor {
             decorations: None,
             indent: content.indent,
             rows: 1,
-            fit: super::fit::InputFit::default(),
+            fit: super::fit::InputFit::new(cx.editor_theme()),
             subscriptions,
         };
         block.marks.clamp(block.text.len());
@@ -520,7 +520,7 @@ impl NotionEditor {
         self.blocks[ix].attrs = attrs;
         // Text size and line height come from the type, so the inset this
         // block learned belongs to the type it no longer is.
-        self.blocks[ix].fit = super::fit::InputFit::default();
+        self.blocks[ix].fit = super::fit::InputFit::new(cx.editor_theme());
         // A type that holds no grid holds no cells either.
         if !caps.grid {
             self.grids.remove(&id);
@@ -760,7 +760,9 @@ impl NotionEditor {
 
     pub(crate) fn layout_at(&self, ix: usize, cx: &App) -> BlockLayout {
         let block = &self.blocks[ix];
-        BlockRegistry::global(cx).get(&block.ty).layout(&block.attrs)
+        BlockRegistry::global(cx)
+            .get(&block.ty)
+            .layout(&block.attrs, cx.editor_theme())
     }
 
     fn block_font(&self, layout: &BlockLayout, cx: &App) -> Font {
@@ -799,7 +801,7 @@ impl NotionEditor {
             .filter(|width| *width > px(1.))
             .unwrap_or_else(|| {
                 self.wrap_width
-                    - style::INDENT_WIDTH * block.indent as f32
+                    - cx.editor_theme().indent_width * block.indent as f32
                     - layout.leading_width
                     - layout.inner_padding * 2.
             });
@@ -848,6 +850,7 @@ impl NotionEditor {
     /// area is snapped to whole device pixels and chasing that snapping in
     /// both directions never settles.
     pub(crate) fn sync_input_insets(&mut self, cx: &mut Context<Self>) {
+        let theme = cx.editor_theme().clone();
         for ix in 0..self.blocks.len() {
             let layout = self.layout_at(ix, cx);
             let needed = self.block_text_height(ix, &layout, cx);
@@ -857,7 +860,7 @@ impl NotionEditor {
                 .text_bounds()
                 .map(|bounds| bounds.size.height);
             if let Some(area) = area {
-                self.blocks[ix].fit.observe(needed, area);
+                self.blocks[ix].fit.observe(needed, area, &theme);
             }
             let glyph = self.blocks[ix]
                 .state
@@ -866,7 +869,7 @@ impl NotionEditor {
                 .map(|bounds| bounds.origin);
             let slot = self.text_slots.get(&self.blocks[ix].id).copied();
             if let (Some(slot), Some(glyph)) = (slot, glyph) {
-                self.blocks[ix].fit.observe_lead(slot, glyph);
+                self.blocks[ix].fit.observe_lead(slot, glyph, &theme);
             }
 
             let state = self.blocks[ix].state.clone();
@@ -900,6 +903,7 @@ impl NotionEditor {
             reveal_controls: self.always_show_gutter,
             line_height: self.line_height_at(ix, cx),
             leading_width: self.layout_at(ix, cx).leading_width,
+            theme: super::theme::EditorTheme::shared(cx),
             attrs: &block.attrs,
             text: &block.text,
             indent: block.indent,
@@ -973,7 +977,7 @@ impl NotionEditor {
 
     fn render_block(&self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let spec = self.spec_at(ix, cx);
-        let layout = spec.layout(&self.blocks[ix].attrs);
+        let layout = spec.layout(&self.blocks[ix].attrs, cx.editor_theme());
         let id = self.blocks[ix].id;
         let indent = self.blocks[ix].indent;
 
@@ -1009,7 +1013,7 @@ impl NotionEditor {
         let margin_top = if ix == 0 {
             px(0.)
         } else if layout.collapse_with_siblings && self.blocks[ix - 1].ty == self.blocks[ix].ty {
-            px(2.)
+            cx.editor_theme().rems(0.125)
         } else {
             layout.margin_top
         };
@@ -1030,8 +1034,9 @@ impl NotionEditor {
             .mb(layout.margin_bottom)
             // The row reaches into the left margin so hovering it covers the
             // gutter controls, which live in that reach.
-            .ml(-style::GUTTER_CONTROLS_WIDTH)
-            .pl(style::GUTTER_CONTROLS_WIDTH + style::INDENT_WIDTH * indent as f32)
+            .ml(-cx.editor_theme().gutter_controls_width)
+            .pl(cx.editor_theme().gutter_controls_width
+                + cx.editor_theme().indent_width * indent as f32)
             .child(gutter)
             .child(
                 // The tint belongs to the block, not to the gutter the row
@@ -1039,7 +1044,8 @@ impl NotionEditor {
                 div()
                     .w_full()
                     .when(selected, |this| {
-                        this.rounded(px(4.)).bg(cx.theme().selection.opacity(0.4))
+                        this.rounded(cx.editor_theme().radius_sm)
+                            .bg(cx.theme().selection.opacity(0.4))
                     })
                     .child(wrapped),
             )
@@ -1166,11 +1172,11 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
                 })
             }
             MarkKind::Code => {
-                style.background_color = Some(style::code_background(cx));
-                style.color = Some(style::code_foreground(cx));
+                style.background_color = Some(cx.editor_theme().code_background);
+                style.color = Some(cx.editor_theme().code_foreground);
             }
             MarkKind::Link(_) => {
-                style.color = Some(style::link_color(cx));
+                style.color = Some(cx.theme().link);
                 style.underline = Some(UnderlineStyle {
                     thickness: px(1.),
                     color: None,
@@ -1178,18 +1184,18 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
                 });
             }
             MarkKind::Highlight(color) => {
-                style.background_color = Some(style::highlight_fill(*color, cx))
+                style.background_color = Some(cx.editor_theme().highlight_fill(*color))
             }
-            MarkKind::TextColor(color) => style.color = style::text_color_value(*color, cx),
+            MarkKind::TextColor(color) => style.color = cx.editor_theme().text_color(*color),
             MarkKind::Mention(_) => {
                 style.color = Some(cx.theme().primary);
                 style.background_color = Some(cx.theme().accent);
             }
             MarkKind::Comment(_) => {
-                style.background_color = Some(style::comment_fill(cx));
+                style.background_color = Some(cx.editor_theme().comment_fill);
                 style.underline = Some(UnderlineStyle {
                     thickness: px(1.),
-                    color: Some(style::comment_accent(cx)),
+                    color: Some(cx.editor_theme().comment_accent),
                     wavy: false,
                 });
             }
@@ -1264,9 +1270,9 @@ impl Render for NotionEditor {
                             // `minmax(auto, 708px)`: the column gives way on a
                             // narrow window instead of running off it.
                             .w_full()
-                            .max_w(style::PAGE_WIDTH)
-                            .px(style::PAGE_PADDING)
-                            .pt(style::PAGE_PADDING)
+                            .max_w(cx.editor_theme().page_width)
+                            .px(cx.editor_theme().page_padding)
+                            .pt(cx.editor_theme().page_padding)
                             .child(self.column_probe(cx))
                             .children(blocks)
                             .child(
@@ -1276,7 +1282,7 @@ impl Render for NotionEditor {
                                     .id("trailing-space")
                                     .test_support()
                                     .w_full()
-                                    .h(style::PAGE_BOTTOM)
+                                    .h(cx.editor_theme().page_bottom)
                                     .cursor_text()
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.focus_trailing_block(window, cx)

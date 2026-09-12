@@ -17,7 +17,7 @@ use gpui_kit::{
 
 use super::block::BlockId;
 use super::mark::MarkKind;
-use super::style;
+use super::theme::ActiveEditorTheme;
 use super::toolbar::OVERLAY_PRIORITY;
 use super::ui;
 use super::view::{DocumentChanged, NotionEditor};
@@ -416,22 +416,23 @@ impl NotionEditor {
         let position = self.comment_anchor(entry, cx)?;
         let draft = self.comment_draft.as_ref()?;
 
+        let theme = cx.editor_theme().clone();
         let messages: Vec<AnyElement> = entry
             .comments
             .iter()
             .map(|comment| {
                 v_flex()
-                    .gap(px(2.))
+                    .gap(theme.rems(0.125))
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme.rems(0.75))
                             .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                             .text_color(cx.theme().foreground)
                             .child(comment.author.clone()),
                     )
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme.rems(0.8125))
                             .text_color(cx.theme().foreground)
                             .child(comment.body.clone()),
                     )
@@ -440,18 +441,18 @@ impl NotionEditor {
             .collect();
 
         let card = ui::popover_surface(cx)
-            .w(px(300.))
+            .w(theme.rems(18.75))
             .flex()
             .flex_col()
-            .gap(px(8.))
-            .p(px(12.))
+            .gap(theme.rems(0.5))
+            .p(theme.rems(0.75))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme.rems(0.75))
                     .text_color(cx.theme().muted_foreground)
                     .border_l_2()
-                    .border_color(style::comment_accent(cx))
-                    .pl(px(8.))
+                    .border_color(theme.comment_accent)
+                    .pl(theme.rems(0.5))
                     .child(SharedString::from(quote_preview(entry.quote()))),
             )
             .children(messages)
@@ -462,7 +463,7 @@ impl NotionEditor {
                     .flex_row()
                     .items_center()
                     .justify_between()
-                    .gap(px(6.))
+                    .gap(theme.rems(0.375))
                     .child(
                         Button::new("resolve-thread")
                             .ghost()
@@ -477,7 +478,7 @@ impl NotionEditor {
                         div()
                             .flex()
                             .flex_row()
-                            .gap(px(6.))
+                            .gap(theme.rems(0.375))
                             .child(
                                 Button::new("cancel-comment")
                                     .ghost()
@@ -503,7 +504,7 @@ impl NotionEditor {
         Some(
             deferred(
                 gpui_kit::base::Positioner::corner(Anchor::TopLeft, position)
-                    .margin(px(8.))
+                    .margin(theme.rems(0.5))
                     .occlude()
                     .child(card),
             )
@@ -524,7 +525,10 @@ impl NotionEditor {
 
         if let Some(range) = range {
             if let Some(bounds) = self.blocks[ix].state.read(cx).range_to_bounds(&range) {
-                return Some(bounds.origin + Point::new(px(0.), bounds.size.height + px(6.)));
+                return Some(
+                    bounds.origin
+                        + Point::new(px(0.), bounds.size.height + cx.editor_theme().rems(0.375)),
+                );
             }
         }
         let bounds = self.block_bounds(thread.block)?;

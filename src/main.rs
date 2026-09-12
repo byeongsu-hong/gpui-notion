@@ -5,7 +5,6 @@ use gpui_notion::editor::block::{BlockAttrs, BlockContent, types};
 use gpui_notion::editor::mark::{HighlightColor, Mark, MarkKind, MarkList};
 use gpui_notion::editor::{self, NotionEditor};
 
-/// The formatting sampler, with its marks measured off the text itself.
 fn marked_paragraph() -> BlockContent {
     let text = "Bold, italic, underline, strike, code and a link.";
     let span = |needle: &str| {
@@ -99,12 +98,29 @@ fn main() {
 
     app.run(move |cx| {
         gpui_kit::init(cx);
-        editor::init(cx);
 
-        // Review aid: `NOTION_THEME=dark` starts in the dark palette.
-        if std::env::var("NOTION_THEME").as_deref() == Ok("dark") {
-            gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
+        // Review aid: `NOTION_THEME=dark` starts in the dark palette, and
+        // `NOTION_FONT_SIZE=<px>` changes the base the document is measured
+        // in — the whole editor scales with it, headings and gutters and
+        // tables together.
+        let dark = std::env::var("NOTION_THEME").as_deref() == Ok("dark");
+        gpui_kit::component::Theme::change(
+            if dark {
+                gpui_kit::component::ThemeMode::Dark
+            } else {
+                gpui_kit::component::ThemeMode::Light
+            },
+            None,
+            cx,
+        );
+        if let Ok(size) = std::env::var("NOTION_FONT_SIZE")
+            && let Ok(size) = size.parse::<f32>()
+        {
+            cx.global_mut::<gpui_kit::component::Theme>().font_size = px(size);
         }
+
+        editor::init(cx);
+        editor::theme::init_appearance_actions(cx);
 
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(1100.), px(860.)), cx)),

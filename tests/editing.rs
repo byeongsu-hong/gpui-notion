@@ -1,10 +1,11 @@
 //! Test drive of the basics: typing, splitting, joining, navigation, lists,
 //! markdown rules, marks and the slash menu — all through the real UI.
 
-use gpui_kit::component::Root;
+use gpui_kit::component::{Root, Theme, ThemeMode};
 use gpui_kit::test::TestWindowExt as _;
 use gpui_kit::{AnyWindowHandle, AppContext as _, Entity, TestAppContext, px, size};
-use gpui_notion::editor::{self, CellPosition, MarkKind, NotionEditor, types};
+use gpui_notion::editor::block::{BlockContent, BlockId};
+use gpui_notion::editor::{self, CellPosition, EditorTheme, MarkKind, NotionEditor, types};
 
 struct Harness {
     editor: Entity<NotionEditor>,
@@ -1703,7 +1704,7 @@ fn a_drag_let_go_away_from_the_blocks_clears_the_drop_line(cx: &mut TestAppConte
         window.hover(("block", 1usize), cx);
         window.render_frame(cx);
         let from = window.find(("drag", 1usize)).bounds().center();
-        let below = window.find(("trailing-space")).bounds().center();
+        let below = window.find("trailing-space").bounds().center();
         window.drag(from, below, cx);
         window.render_frame(cx);
     })
@@ -1818,5 +1819,185 @@ fn undo_keeps_a_comment_thread_pointing_at_its_block(cx: &mut TestAppContext) {
             Some(0),
             "the thread points at a block that is no longer in the document"
         );
+    });
+}
+
+// ---------------------------------------------------------------- theming
+
+/// Open a document with a base font size of `font_size`, the way an
+/// application that wants a bigger or smaller editor would set it.
+fn setup_zoomed(cx: &mut TestAppContext, font_size: f32) -> (Harness, Vec<BlockId>) {
+    cx.update(gpui_kit::init);
+    cx.update(|cx| {
+        Theme::change(ThemeMode::Light, None, cx);
+        cx.global_mut::<Theme>().font_size = px(font_size);
+    });
+    cx.update(editor::init);
+
+    let content = vec![
+        BlockContent::new(editor::types::HEADING, "Title")
+            .with_attrs(gpui_notion::editor::BlockAttrs::level(1)),
+        BlockContent::paragraph("A paragraph of prose that is long enough to wrap in the column."),
+        BlockContent::new(editor::types::BULLET_LIST, "An item"),
+    ];
+    let mut view = None;
+    let handle = cx.open_window(size(px(900.), px(700.)), |window, cx| {
+        let editor = cx.new(|cx| NotionEditor::with_content(content.clone(), window, cx));
+        view = Some(editor.clone());
+        Root::new(editor, window, cx)
+    });
+    let harness = Harness {
+        editor: view.unwrap(),
+        window: handle.into(),
+    };
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    let ids = cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        (0..editor.block_count())
+            .filter_map(|ix| editor.block_id_at(ix))
+            .collect()
+    });
+    (harness, ids)
+}
+
+#[gpui_kit::test]
+fn the_base_font_size_scales_the_whole_document(cx: &mut TestAppContext) {
+    let mut sizes = Vec::new();
+    for base in [16., 24.] {
+        let (harness, ids) = setup_zoomed(cx, base);
+        let trailing = harness.ui(cx, |window, _cx| {
+            f32::from(window.find("trailing-space").bounds().size.height)
+        });
+        let measured = cx.update(|cx| {
+            let editor = harness.editor.read(cx);
+            let heading = editor.block_bounds(ids[0]).expect("the heading laid out");
+            let paragraph = editor.block_bounds(ids[1]).expect("the paragraph laid out");
+            // The marker sits inside the block, so the distance between a
+            // paragraph's text and a list item's is measured at the glyphs.
+            let prose = editor.input_geometry(ids[1], cx).expect("prose laid out");
+            let item = editor.input_geometry(ids[2], cx).expect("item laid out");
+            (
+                f32::from(heading.size.height),
+                f32::from(paragraph.origin.y - heading.origin.y),
+                item.4 - prose.4,
+                trailing,
+            )
+        });
+        sizes.push(measured);
+    }
+
+    let (small, large) = (sizes[0], sizes[1]);
+    let ratio = 24. / 16.;
+    for (a, b, what) in [
+        (small.0, large.0, "the heading's height"),
+        (small.1, large.1, "the space under the heading"),
+        (small.2, large.2, "the indent of a list item"),
+        (small.3, large.3, "the space under the last block"),
+    ] {
+        assert!(
+            (b / a - ratio).abs() < 0.12,
+            "{what} went from {a} to {b}, which is not the {ratio}x the base changed by"
+        );
+    }
+}
+
+#[gpui_kit::test]
+fn a_zoomed_document_still_holds_its_text(cx: &mut TestAppContext) {
+    let (harness, ids) = setup_zoomed(cx, 24.);
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        for id in &ids {
+            assert!(
+                editor.text_area_fits_text(*id, cx),
+                "a block came up short at a bigger base size"
+            );
+        }
+    });
+}
+
+#[gpui_kit::test]
+fn an_application_can_restyle_the_editor(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let before = cx.update(|cx| f32::from(EditorTheme::global(cx).page_width));
+
+    cx.update(|cx| {
+        EditorTheme::customize(cx, |theme, _| {
+            theme.page_width = theme.rems(30.);
+            theme.comment_fill = gpui_kit::red();
+        });
+    });
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+
+    let after = cx.update(|cx| f32::from(EditorTheme::global(cx).page_width));
+    assert_ne!(before, after);
+    assert_eq!(after, 480.);
+
+    // A theme change re-derives the tokens; the customization survives it.
+    cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    cx.update(|cx| {
+        let theme = EditorTheme::global(cx);
+        assert_eq!(f32::from(theme.page_width), 480.);
+        assert_eq!(theme.comment_fill, gpui_kit::red());
+    });
+}
+
+#[gpui_kit::test]
+fn switching_to_dark_repaints_the_document(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let light = cx.update(|cx| EditorTheme::global(cx).code_foreground);
+
+    cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+
+    cx.update(|cx| {
+        let theme = EditorTheme::global(cx);
+        assert_ne!(theme.code_foreground, light, "the palette did not follow");
+        assert_eq!(
+            theme.code_block_background.a,
+            gpui_kit::component::Theme::global(cx).muted.opacity(0.45).a,
+            "a surface kept a light-theme value"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn the_zoom_keys_resize_the_document(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    cx.update(editor::theme::init_appearance_actions);
+    harness.type_text("prose", cx);
+
+    let measure = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            let editor = harness.editor.read(cx);
+            let id = editor.block_id_at(0).unwrap();
+            f32::from(editor.block_bounds(id).unwrap().size.height)
+        })
+    };
+    let before = measure(cx);
+
+    harness.press("secondary-=", cx);
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    let bigger = measure(cx);
+    assert!(
+        bigger > before,
+        "the block did not grow with the base size ({before} → {bigger})"
+    );
+    assert_eq!(cx.update(|cx| f32::from(Theme::global(cx).font_size)), 18.);
+
+    harness.press("secondary-0", cx);
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    assert_eq!(measure(cx), before, "the reset did not put the size back");
+
+    // The appearance action swaps the palette without losing the size.
+    cx.update(|cx| editor::theme::set_base_size(20., cx));
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    harness.press("secondary-shift-l", cx);
+    harness.ui(cx, |window, cx| window.render_frame(cx));
+    cx.update(|cx| {
+        assert!(Theme::global(cx).mode.is_dark());
+        assert_eq!(f32::from(Theme::global(cx).font_size), 20.);
+        assert_eq!(f32::from(EditorTheme::global(cx).rem), 20.);
     });
 }

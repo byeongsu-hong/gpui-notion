@@ -21,7 +21,7 @@ use super::block::{
     BlockAttrs, BlockCaps, BlockContext, BlockInputRule, BlockLayout, BlockRegistry, BlockSpec,
     BlockType, SlashItem, leading_slot, types,
 };
-use super::style;
+use super::theme::EditorTheme;
 
 /// Register the node types the Notion-like editor ships with.
 pub fn init(cx: &mut App) {
@@ -81,24 +81,17 @@ impl BlockSpec for Heading {
         format!("Heading {}", attrs.level.max(1)).into()
     }
 
-    fn layout(&self, attrs: &BlockAttrs) -> BlockLayout {
-        // 1.5em / 1.25em / 1.125em over a 1rem base, with the template's
-        // em-relative top margins resolved against each heading's own size.
-        // The template's heading margins are em-relative to each heading's own
-        // size: 3em, 2.5em, 2em.
-        let (size, weight, margin_em) = match attrs.level.max(1) {
-            1 => (px(24.), FontWeight::BOLD, 3.0),
-            2 => (px(20.), FontWeight::BOLD, 2.5),
-            3 => (px(18.), FontWeight::SEMIBOLD, 2.0),
-            _ => (px(16.), FontWeight::SEMIBOLD, 2.0),
-        };
+    fn layout(&self, attrs: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
+        // The space above a heading is relative to the heading's own size, as
+        // it is in the template, so the hierarchy survives a change of base.
+        let heading = theme.heading(attrs.level);
         BlockLayout {
-            text_size: size,
-            font_weight: weight,
-            line_height: 1.3,
-            margin_top: size * margin_em,
-            margin_bottom: px(2.),
-            ..Default::default()
+            text_size: heading.size,
+            font_weight: heading.weight,
+            line_height: heading.line_height,
+            margin_top: heading.size * heading.margin_above,
+            margin_bottom: theme.rems(0.125),
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -160,14 +153,14 @@ impl BlockSpec for Heading {
 
 // ----------------------------------------------------------------- list items
 
-fn list_layout() -> BlockLayout {
+fn list_layout(theme: &EditorTheme) -> BlockLayout {
     BlockLayout {
         // A list gets air above it; items inside it sit tight together,
         // which `collapse_with_siblings` takes care of.
-        margin_top: px(24.),
-        leading_width: px(24.),
+        margin_top: theme.section_gap,
+        leading_width: theme.marker_width,
         collapse_with_siblings: true,
-        ..Default::default()
+        ..BlockLayout::new(theme)
     }
 }
 
@@ -186,8 +179,8 @@ impl BlockSpec for BulletList {
         BlockCaps::list()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
-        list_layout()
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
+        list_layout(theme)
     }
 
     fn placeholder(&self, _: &BlockAttrs) -> SharedString {
@@ -209,7 +202,7 @@ impl BlockSpec for BulletList {
             ctx,
             div()
                 .w_full()
-                .text_size(px(16.))
+                .text_size(ctx.theme.text_size)
                 .text_color(cx.theme().foreground)
                 .child(glyph),
         ))
@@ -249,8 +242,8 @@ impl BlockSpec for OrderedList {
         BlockCaps::list()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
-        list_layout()
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
+        list_layout(theme)
     }
 
     fn placeholder(&self, _: &BlockAttrs) -> SharedString {
@@ -273,7 +266,7 @@ impl BlockSpec for OrderedList {
             ctx,
             div()
                 .w_full()
-                .text_size(px(15.))
+                .text_size(ctx.theme.table_text_size)
                 .text_color(cx.theme().foreground)
                 .child(label),
         ))
@@ -360,12 +353,12 @@ impl BlockSpec for TaskList {
         BlockCaps::list()
     }
 
-    fn layout(&self, attrs: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, attrs: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
             // A checked item is dimmed and struck through.
             text_opacity: if attrs.checked { 0.5 } else { 1.0 },
             strikethrough: attrs.checked,
-            ..list_layout()
+            ..list_layout(theme)
         }
     }
 
@@ -392,8 +385,8 @@ impl BlockSpec for TaskList {
             ctx,
             div()
                 .id(("check", id.0 as usize))
-                .size(px(16.))
-                .rounded(px(4.))
+                .size(ctx.theme.text_size)
+                .rounded(ctx.theme.radius_sm)
                 .border_1()
                 .border_color(border_color)
                 .bg(bg)
@@ -404,7 +397,7 @@ impl BlockSpec for TaskList {
                 .when(checked, |this| {
                     this.child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(ctx.theme.rems(0.6875))
                             .text_color(cx.theme().primary_foreground)
                             .child("✓"),
                     )
@@ -466,13 +459,13 @@ impl BlockSpec for Blockquote {
         }
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            margin_top: px(24.),
+            margin_top: theme.section_gap,
             margin_bottom: px(0.),
-            inner_padding: px(16.),
+            inner_padding: theme.block_padding,
             collapse_with_siblings: true,
-            ..Default::default()
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -480,19 +473,26 @@ impl BlockSpec for Blockquote {
         "Empty quote".into()
     }
 
-    fn wrap(&self, _: &BlockContext, content: AnyElement, _: &mut Window, cx: &mut App) -> AnyElement {
+    fn wrap(
+        &self,
+        ctx: &BlockContext,
+        content: AnyElement,
+        _: &mut Window,
+        _cx: &mut App,
+    ) -> AnyElement {
+        let theme = &ctx.theme;
         h_flex()
             .w_full()
             .items_stretch()
-            .py(px(6.))
+            .py(theme.rems(0.375))
             .child(
                 div()
-                    .w(px(4.))
+                    .w(theme.rems(0.25))
                     .flex_none()
-                    .rounded(px(2.))
-                    .bg(cx.theme().foreground),
+                    .rounded(theme.radius_sm)
+                    .bg(theme.quote_bar),
             )
-            .child(div().flex_1().pl(px(16.)).child(content))
+            .child(div().flex_1().pl(theme.block_padding).child(content))
             .into_any_element()
     }
 
@@ -537,15 +537,15 @@ impl BlockSpec for CodeBlock {
         }
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            text_size: px(14.),
-            line_height: 1.5,
-            margin_top: px(24.),
+            text_size: theme.code_text_size,
+            line_height: theme.code_line_height,
+            margin_top: theme.section_gap,
             margin_bottom: px(0.),
             mono: true,
-            inner_padding: px(16.),
-            ..Default::default()
+            inner_padding: theme.block_padding,
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -559,19 +559,19 @@ impl BlockSpec for CodeBlock {
         v_flex()
             .w_full()
             .relative()
-            .p(px(16.))
-            .rounded(px(6.))
+            .p(ctx.theme.block_padding)
+            .rounded(ctx.theme.radius)
             .border_1()
             .border_color(cx.theme().border)
-            .bg(cx.theme().muted.opacity(0.5))
+            .bg(ctx.theme.code_block_background)
             .child(content)
             .child(
                 // The language sits in the corner and only shows on hover,
                 // the way a code block names itself without shouting.
                 div()
                     .absolute()
-                    .top(px(4.))
-                    .right(px(4.))
+                    .top(ctx.theme.rems(0.25))
+                    .right(ctx.theme.rems(0.25))
                     .invisible()
                     .group_hover(super::view::group_name(ctx.id), |this| this.visible())
                     .child(
@@ -654,11 +654,11 @@ impl BlockSpec for HorizontalRule {
         BlockCaps::atom()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            margin_top: px(24.),
-            margin_bottom: px(24.),
-            ..Default::default()
+            margin_top: theme.section_gap,
+            margin_bottom: theme.section_gap,
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -708,11 +708,11 @@ impl BlockSpec for Image {
         BlockCaps::atom()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            margin_top: px(24.),
-            margin_bottom: px(24.),
-            ..Default::default()
+            margin_top: theme.section_gap,
+            margin_bottom: theme.section_gap,
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -727,8 +727,8 @@ impl BlockSpec for Image {
                 div()
                     .id(("image-drop", id.0 as usize))
                     .w_full()
-                    .h(px(120.))
-                    .rounded(px(6.))
+                    .h(ctx.theme.rems(7.5))
+                    .rounded(ctx.theme.radius)
                     .border_1()
                     .border_dashed()
                     .border_color(if selected {
@@ -739,11 +739,15 @@ impl BlockSpec for Image {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .gap(px(6.))
+                    .gap(ctx.theme.rems(0.375))
                     .cursor_pointer()
                     .hover(|this| this.bg(cx.theme().muted.opacity(0.4)))
                     .text_color(cx.theme().muted_foreground)
-                    .child(super::ui::icon("image-up", px(18.), cx.theme().muted_foreground))
+                    .child(super::ui::icon(
+                        "image-up",
+                        ctx.theme.rems(1.125),
+                        cx.theme().muted_foreground,
+                    ))
                     .child("Click to upload or drag and drop")
                     .on_click(move |_, window, cx| {
                         let _ = editor.update(cx, |editor, cx| editor.pick_image(id, window, cx));
@@ -764,7 +768,7 @@ impl BlockSpec for Image {
                 .when(selected, |this| {
                     this.border_2().border_color(cx.theme().primary)
                 })
-                .child(img(src.to_string()).w_full().rounded(px(6.)))
+                .child(img(src.to_string()).w_full().rounded(ctx.theme.radius))
                 .into_any_element(),
         )
     }
@@ -794,11 +798,11 @@ impl BlockSpec for Callout {
         "Callout".into()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            margin_top: px(20.),
-            inner_padding: px(16.),
-            ..Default::default()
+            margin_top: theme.block_gap,
+            inner_padding: theme.block_padding,
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -814,7 +818,7 @@ impl BlockSpec for Callout {
             Some(emoji) => div().child(emoji).into_any_element(),
             None => super::ui::icon(
                 "lightbulb",
-                px(18.),
+                ctx.theme.rems(1.125),
                 cx.theme().muted_foreground,
             )
             .into_any_element(),
@@ -823,11 +827,11 @@ impl BlockSpec for Callout {
         h_flex()
             .w_full()
             .items_start()
-            .gap(px(10.))
-            .p(px(16.))
-            .rounded(px(6.))
-            .bg(cx.theme().muted.opacity(0.6))
-            .child(div().flex_none().pt(px(2.)).child(marker))
+            .gap(ctx.theme.rems(0.625))
+            .p(ctx.theme.block_padding)
+            .rounded(ctx.theme.radius)
+            .bg(ctx.theme.callout_background)
+            .child(div().flex_none().pt(ctx.theme.rems(0.125)).child(marker))
             .child(div().flex_1().child(content))
             .into_any_element()
     }
@@ -864,11 +868,11 @@ impl BlockSpec for Toggle {
         }
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            leading_width: px(24.),
-            margin_top: px(4.),
-            ..Default::default()
+            leading_width: theme.marker_width,
+            margin_top: theme.rems(0.25),
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -884,13 +888,13 @@ impl BlockSpec for Toggle {
             ctx,
             div()
                 .id(("toggle", id.0 as usize))
-                .size(px(20.))
+                .size(ctx.theme.rems(1.25))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(4.))
+                .rounded(ctx.theme.radius_sm)
                 .cursor_pointer()
-                .text_size(px(10.))
+                .text_size(ctx.theme.rems(0.625))
                 .text_color(cx.theme().muted_foreground)
                 .hover(|this| this.bg(cx.theme().accent))
                 .child(if collapsed { "▶" } else { "▼" })
@@ -930,20 +934,12 @@ pub fn relative_line_height(layout: &BlockLayout) -> gpui_kit::DefiniteLength {
     relative(layout.line_height)
 }
 
-/// Re-exported so specs in other crates can size themselves like the built-ins.
-pub use style::TEXT_SIZE as BASE_TEXT_SIZE;
 
 // ---------------------------------------------------------------------- table
 
 /// A table of text cells. The block itself holds no text: its content lives
 /// in the [`CellGrid`](super::grid::CellGrid) the editor keeps beside it.
 pub struct Table;
-
-/// How wide a column has to be before its text wraps.
-const CELL_MIN_WIDTH: gpui_kit::Pixels = px(120.);
-/// Table text is a step down from the body, with the document's leading.
-const CELL_TEXT_SIZE: gpui_kit::Pixels = px(15.);
-const CELL_LINE_HEIGHT_RATIO: f32 = 1.5;
 
 impl BlockSpec for Table {
     fn type_name(&self) -> &'static str {
@@ -958,11 +954,11 @@ impl BlockSpec for Table {
         BlockCaps::grid()
     }
 
-    fn layout(&self, _: &BlockAttrs) -> BlockLayout {
+    fn layout(&self, _: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         BlockLayout {
-            margin_top: px(24.),
-            margin_bottom: px(8.),
-            ..Default::default()
+            margin_top: theme.section_gap,
+            margin_bottom: theme.rems(0.5),
+            ..BlockLayout::new(theme)
         }
     }
 
@@ -988,11 +984,11 @@ impl BlockSpec for Table {
                 .id(("table", id.0 as usize))
                 .test_support()
                 .items_start()
-                .gap(px(2.))
+                .gap(ctx.theme.rems(0.125))
                 .child(
                     v_flex()
                         .flex_1()
-                        .rounded(px(6.))
+                        .rounded(ctx.theme.radius)
                         .overflow_hidden()
                         .border_1()
                         .border_color(cx.theme().border)
@@ -1002,7 +998,12 @@ impl BlockSpec for Table {
                 )
                 // Row and column controls sit outside the table's frame, the
                 // way Notion keeps them out of the data.
-                .child(v_flex().flex_none().pt(px(1.)).children(row_controls))
+                .child(
+                    v_flex()
+                        .flex_none()
+                        .pt(ctx.theme.rems(0.0625))
+                        .children(row_controls),
+                )
                 .child(add_column_button(ctx, cx))
                 .into_any_element(),
         )
@@ -1021,7 +1022,7 @@ impl BlockSpec for Table {
 }
 
 fn render_row(
-    _ctx: &BlockContext,
+    ctx: &BlockContext,
     grid: &super::grid::CellGrid,
     row: usize,
     columns: usize,
@@ -1039,7 +1040,7 @@ fn render_row(
             Some(
                 div()
                     .flex_1()
-                    .min_w(CELL_MIN_WIDTH)
+                    .min_w(ctx.theme.rems(7.5))
                     .when(column + 1 < columns, |this| {
                         this.border_r_1().border_color(cx.theme().border)
                     })
@@ -1048,8 +1049,8 @@ fn render_row(
                             .appearance(false)
                             .bordered(false)
                             .h(cell.height(text_height))
-                            .text_size(CELL_TEXT_SIZE)
-                            .line_height(relative(CELL_LINE_HEIGHT_RATIO))
+                            .text_size(ctx.theme.table_text_size)
+                            .line_height(relative(ctx.theme.table_line_height))
                             .font_family(cx.theme().font_family.clone())
                             .text_color(cx.theme().foreground)
                             .when(header, |this| this.font_weight(FontWeight::SEMIBOLD)),
@@ -1063,7 +1064,7 @@ fn render_row(
         .w_full()
         .h(row_height)
         .items_stretch()
-        .when(header, |this| this.bg(cx.theme().muted.opacity(0.5)))
+        .when(header, |this| this.bg(ctx.theme.table_header_background))
         .when(row + 1 <= grid.rows(), |this| {
             this.border_b_1().border_color(cx.theme().border)
         })
@@ -1081,7 +1082,7 @@ fn row_control(
     let id = ctx.id;
     let editor = ctx.editor.clone();
     div()
-        .w(px(22.))
+        .w(ctx.theme.rems(1.375))
         .h(row_height)
         .flex()
         .items_center()
@@ -1109,7 +1110,7 @@ fn add_row_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
     let rows = ctx.grid.map(super::grid::CellGrid::rows).unwrap_or(1);
     div()
         .w_full()
-        .h(px(20.))
+        .h(ctx.theme.rems(1.25))
         .flex()
         .items_center()
         .justify_center()
@@ -1120,7 +1121,11 @@ fn add_row_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
                 .group_hover(super::view::group_name(id), |this| this.visible())
         })
         .hover(|this| this.bg(cx.theme().muted.opacity(0.6)))
-        .child(super::ui::icon("plus", px(14.), cx.theme().muted_foreground))
+        .child(super::ui::icon(
+            "plus",
+            ctx.theme.rems(0.875),
+            cx.theme().muted_foreground,
+        ))
         .id(("add-row", id.0 as usize))
         .test_support()
         .on_click(move |_, window, cx| {
@@ -1138,23 +1143,27 @@ fn add_column_button(ctx: &BlockContext, cx: &mut App) -> AnyElement {
     let height = ctx
         .grid
         .map(|grid| grid.row_height(0))
-        .unwrap_or(px(32.));
+        .unwrap_or(ctx.theme.rems(2.));
     div()
         .flex_none()
-        .w(px(20.))
+        .w(ctx.theme.rems(1.25))
         .h(height)
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .rounded(px(4.))
+        .rounded(ctx.theme.radius_sm)
         .text_color(cx.theme().muted_foreground)
         .when(!ctx.reveal_controls, |this| {
             this.invisible()
                 .group_hover(super::view::group_name(id), |this| this.visible())
         })
         .hover(|this| this.bg(cx.theme().muted.opacity(0.6)))
-        .child(super::ui::icon("plus", px(14.), cx.theme().muted_foreground))
+        .child(super::ui::icon(
+            "plus",
+            ctx.theme.rems(0.875),
+            cx.theme().muted_foreground,
+        ))
         .id(("add-column", id.0 as usize))
         .test_support()
         .on_click(move |_, window, cx| {

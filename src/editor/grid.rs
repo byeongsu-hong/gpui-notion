@@ -9,6 +9,7 @@ use gpui_kit::component::input::{EditorState, InputEvent};
 use gpui_kit::{App, AppContext as _, Context, Entity, Focusable as _, Pixels, Subscription, Window, px};
 
 use super::fit::InputFit;
+use super::theme::ActiveEditorTheme;
 
 use super::block::{BlockContent, BlockId};
 use super::view::NotionEditor;
@@ -137,11 +138,6 @@ const ROW_SEPARATOR: char = '\u{1e}';
 const CELL_SEPARATOR: char = '\u{1f}';
 const CELLS_ATTRIBUTE: &str = "cells";
 
-/// A cell's row height before it has laid out once: the table's text size
-/// through its line-height ratio (`blocks::CELL_TEXT_SIZE * ..RATIO`). Once a
-/// cell has laid out, its own line height is used instead.
-pub(crate) const CELL_LINE_HEIGHT: Pixels = px(22.5);
-
 /// What a table starts as when nothing says otherwise.
 const DEFAULT_ROWS: usize = 3;
 const DEFAULT_COLUMNS: usize = 3;
@@ -239,7 +235,7 @@ impl NotionEditor {
             state,
             text: String::new(),
             needed: px(0.),
-            fit: InputFit::default(),
+            fit: InputFit::new(cx.editor_theme()),
             _subscription: subscription,
         }
     }
@@ -247,11 +243,13 @@ impl NotionEditor {
     /// Measure what every cell's input did with the height it was given, the
     /// way blocks are measured, so a cell never scrolls inside itself.
     pub(crate) fn sync_cell_insets(&mut self, cx: &mut Context<Self>) {
+        let theme = cx.editor_theme().clone();
+        let fallback_line_height = theme.table_text_size * theme.table_line_height;
         for grid in self.grids.values_mut() {
             for row in &mut grid.rows {
                 for cell in row.iter_mut() {
                     cell.needed =
-                        super::fit::text_height(&cell.state, &cell.text, CELL_LINE_HEIGHT, cx);
+                        super::fit::text_height(&cell.state, &cell.text, fallback_line_height, cx);
                 }
             }
 
@@ -268,7 +266,7 @@ impl NotionEditor {
                         .text_bounds()
                         .map(|bounds| bounds.size.height);
                     if let Some(area) = area {
-                        cell.fit.observe(targets[row], area);
+                        cell.fit.observe(targets[row], area, &theme);
                     }
                 }
             }

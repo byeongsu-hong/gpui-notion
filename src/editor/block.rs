@@ -16,7 +16,7 @@ use gpui_kit::{
 };
 
 use super::mark::{MarkKind, MarkList};
-use super::style;
+use super::theme::EditorTheme;
 use super::view::NotionEditor;
 
 /// Stable identity of a block, used by focus, drag & drop and selection.
@@ -174,13 +174,14 @@ pub struct BlockLayout {
     pub strikethrough: bool,
 }
 
-impl Default for BlockLayout {
-    fn default() -> Self {
+impl BlockLayout {
+    /// How an ordinary paragraph is set, which every other block starts from.
+    pub fn new(theme: &EditorTheme) -> Self {
         Self {
-            text_size: style::TEXT_SIZE,
+            text_size: theme.text_size,
             font_weight: FontWeight::NORMAL,
-            line_height: style::LINE_HEIGHT,
-            margin_top: style::BLOCK_GAP,
+            line_height: theme.line_height,
+            margin_top: theme.block_gap,
             margin_bottom: px(0.),
             mono: false,
             leading_width: px(0.),
@@ -190,9 +191,7 @@ impl Default for BlockLayout {
             strikethrough: false,
         }
     }
-}
 
-impl BlockLayout {
     pub fn line_height_px(&self) -> Pixels {
         self.text_size * self.line_height
     }
@@ -237,6 +236,8 @@ pub struct BlockContext<'a> {
     pub line_height: Pixels,
     /// Width of the marker column this block's layout asks for.
     pub leading_width: Pixels,
+    /// The tokens the document is drawn with.
+    pub theme: std::rc::Rc<EditorTheme>,
     pub editor: WeakEntity<NotionEditor>,
 }
 
@@ -252,9 +253,12 @@ pub trait BlockSpec: 'static + Send + Sync {
         BlockCaps::default()
     }
 
-    fn layout(&self, attrs: &BlockAttrs) -> BlockLayout {
+    /// How this block is set, in the tokens in force. A spec reads its sizes
+    /// and spacing from `theme` rather than stating pixels, so a document
+    /// zooms and re-themes as one piece.
+    fn layout(&self, attrs: &BlockAttrs, theme: &EditorTheme) -> BlockLayout {
         let _ = attrs;
-        BlockLayout::default()
+        BlockLayout::new(theme)
     }
 
     fn placeholder(&self, attrs: &BlockAttrs) -> SharedString {

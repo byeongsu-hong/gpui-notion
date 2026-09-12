@@ -14,6 +14,7 @@ use gpui_kit::{
 use super::block::BlockId;
 use super::actions;
 use super::block::BlockRegistry;
+use super::theme::ActiveEditorTheme;
 use super::ui::Lucide;
 use super::view::{Caret, NotionEditor, group_name};
 
@@ -30,14 +31,15 @@ pub struct DragPreview {
 
 impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.editor_theme();
         div()
-            .px(px(10.))
-            .py(px(4.))
-            .rounded(px(6.))
+            .px(theme.rems(0.625))
+            .py(theme.rems(0.25))
+            .rounded(theme.radius)
             .bg(cx.theme().popover)
             .border_1()
             .border_color(cx.theme().border)
-            .text_size(px(14.))
+            .text_size(theme.ui_text_size)
             .text_color(cx.theme().foreground)
             .shadow_md()
             .child(if self.text.is_empty() {
@@ -79,18 +81,22 @@ impl NotionEditor {
             .read(cx)
             .line_height()
             .unwrap_or_else(|| layout.line_height_px());
-        let top = (line_height - px(24.)).max(px(0.)) / 2.;
+        // The controls are as tall as a marker slot and centred on the first
+        // line of text, whatever size that line turned out to be.
+        let theme = cx.editor_theme().clone();
+        let controls_height = theme.marker_width;
+        let top = (line_height - controls_height).max(px(0.)) / 2.;
 
         let mut controls = div()
             .absolute()
             // The controls track the block's indentation, so they stay the
             // same distance from its text however deeply it is nested.
-            .left(px(4.) + super::style::INDENT_WIDTH * block.indent() as f32)
+            .left(theme.rems(0.25) + theme.indent_width * block.indent() as f32)
             .top(top)
-            .h(px(24.))
+            .h(controls_height)
             .flex()
             .items_center()
-            .gap(px(2.));
+            .gap(theme.rems(0.125));
         if !self.always_show_gutter {
             controls = controls
                 .invisible()
@@ -207,8 +213,8 @@ impl NotionEditor {
         // an absolutely positioned child is placed against the border edge —
         // so the line starts where the block's own content starts.
         let indent = self.blocks.get(ix).map(|block| block.indent()).unwrap_or(0);
-        let left = super::style::GUTTER_CONTROLS_WIDTH
-            + super::style::INDENT_WIDTH * indent as f32;
+        let left = cx.editor_theme().gutter_controls_width
+            + cx.editor_theme().indent_width * indent as f32;
         Some(
             div()
                 .absolute()
@@ -219,8 +225,8 @@ impl NotionEditor {
                     |this| this.bottom(px(-1.)),
                     |this| this.top(px(-1.)),
                 )
-                .h(px(2.))
-                .rounded(px(1.))
+                .h(cx.editor_theme().rems(0.125))
+                .rounded(cx.editor_theme().radius_sm)
                 .bg(cx.theme().primary),
         )
     }

@@ -1,10 +1,9 @@
 //! Shared presentation helpers: icons, popover surfaces, toolbar buttons.
 
-use gpui_kit::component::ActiveTheme;
-use gpui_kit::{
-    App, Div, InteractiveElement as _, IntoElement, SharedString, Styled as _,
-    div, px,
-};
+use gpui_kit::component::{ActiveTheme, ThemeStyled as _};
+use gpui_kit::{App, Div, InteractiveElement as _, IntoElement, SharedString, Styled as _, div};
+
+use super::theme::ActiveEditorTheme;
 
 /// An icon from the bundled Lucide set, named the way the Tiptap template
 /// names them (`heading-1`, `list-ordered`, …).
@@ -32,30 +31,26 @@ impl Lucide {
 }
 
 /// The popover surface shared by the slash menu, toolbar and link editor.
+///
+/// This is the framework's own popup treatment — the one Select, Combobox and
+/// the menus use — so the editor's surfaces cannot drift away from the ones
+/// beside them.
 pub fn popover_surface(cx: &App) -> Div {
-    div()
-        .bg(cx.theme().popover)
-        .text_color(cx.theme().popover_foreground)
-        .border_1()
-        .border_color(cx.theme().border)
-        // The theme owns the corner, so this surface matches the menus and
-        // popovers gpui-kit draws beside it.
-        .rounded(cx.theme().radius)
-        .shadow_lg()
-        .p(px(4.))
+    div().popover_style(cx).p(cx.editor_theme().rems(0.25))
 }
 
 /// A row in a menu: fixed height, hover fill, rounded.
 pub fn menu_row(selected: bool, cx: &App) -> Div {
+    let theme = cx.editor_theme();
     let row = div()
-        .h(px(32.))
-        .px(px(8.))
+        .h(theme.rems(2.))
+        .px(theme.rems(0.5))
         .flex()
         .items_center()
-        .gap(px(8.))
-        .rounded(px(6.))
+        .gap(theme.rems(0.5))
+        .rounded(theme.radius)
         .cursor_pointer()
-        .text_size(px(14.));
+        .text_size(theme.ui_text_size);
     if selected {
         row.bg(cx.theme().accent).text_color(cx.theme().accent_foreground)
     } else {
@@ -65,13 +60,14 @@ pub fn menu_row(selected: bool, cx: &App) -> Div {
 
 /// A toolbar button: 2rem square, ghost by default, filled when active.
 pub fn toolbar_button(id: impl Into<gpui_kit::ElementId>, active: bool, cx: &App) -> gpui_kit::Stateful<Div> {
+    let theme = cx.editor_theme();
     let button = div()
         .id(id)
-        .size(px(32.))
+        .size(theme.rems(2.))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(theme.radius)
         .cursor_pointer();
     if active {
         button
