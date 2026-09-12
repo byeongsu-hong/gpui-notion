@@ -2035,3 +2035,24 @@ fn the_template_palette_survives_an_appearance_change(cx: &mut TestAppContext) {
         );
     });
 }
+
+#[gpui_kit::test]
+fn the_document_settles_and_stops_moving(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("a paragraph that sits still", cx);
+
+    let mut frames = Vec::new();
+    for _ in 0..12 {
+        harness.ui(cx, |window, cx| window.render_frame(cx));
+        frames.push(cx.update(|cx| {
+            let editor = harness.editor.read(cx);
+            let id = editor.block_id_at(0).unwrap();
+            editor.input_geometry(id, cx)
+        }));
+    }
+    let settled: Vec<_> = frames[6..].to_vec();
+    assert!(
+        settled.windows(2).all(|pair| pair[0] == pair[1]),
+        "the block never stopped moving: {settled:#?}"
+    );
+}

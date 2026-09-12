@@ -851,8 +851,11 @@ impl NotionEditor {
     /// measured rather than assumed, and only ever widened, because the text
     /// area is snapped to whole device pixels and chasing that snapping in
     /// both directions never settles.
-    pub(crate) fn sync_input_insets(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sync_input_insets(&mut self, window: &Window, cx: &mut Context<Self>) {
         let theme = cx.editor_theme().clone();
+        // What one physical pixel is worth here: the resolution at which the
+        // measurements below are worth acting on at all.
+        let device_pixel = px(1.) / window.scale_factor();
         for ix in 0..self.blocks.len() {
             let layout = self.layout_at(ix, cx);
             let needed = self.block_text_height(ix, &layout, cx);
@@ -871,7 +874,9 @@ impl NotionEditor {
                 .map(|bounds| bounds.origin);
             let slot = self.text_slots.get(&self.blocks[ix].id).copied();
             if let (Some(slot), Some(glyph)) = (slot, glyph) {
-                self.blocks[ix].fit.observe_lead(slot, glyph, &theme);
+                self.blocks[ix]
+                    .fit
+                    .observe_lead(slot, glyph, &theme, device_pixel);
             }
 
             let state = self.blocks[ix].state.clone();
@@ -1217,7 +1222,7 @@ impl Focusable for NotionEditor {
 
 impl Render for NotionEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.sync_input_insets(cx);
+        self.sync_input_insets(window, cx);
         let in_a_block = self.refresh_focus(window, cx);
         self.refresh_focused_cell(in_a_block, window, cx);
         // Block bounds are re-reported by every block that lays out this

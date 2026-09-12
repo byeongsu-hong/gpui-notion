@@ -73,17 +73,27 @@ impl InputFit {
 
     /// Learn where the input actually put its first glyph: `slot` is the
     /// corner the layout handed the block, `glyph` is where the text starts.
+    ///
+    /// `device_pixel` is what one physical pixel is worth in logical ones,
+    /// and it is the resolution of the answer: text is painted on the
+    /// physical grid, so moving a box by less than one physical pixel can
+    /// move the glyph by a whole one, or by none at all. Correcting an error
+    /// smaller than that does not remove it — it trades it for another one,
+    /// and the text walks back and forth for as long as the window is open.
+    /// So the fit only spends an error it can actually pay with.
     pub fn observe_lead(
         &mut self,
         slot: gpui_kit::Point<Pixels>,
         glyph: gpui_kit::Point<Pixels>,
         theme: &EditorTheme,
+        device_pixel: Pixels,
     ) {
         let error = glyph - slot;
-        if error.x.abs() > px(0.05) {
+        let worth_moving = device_pixel.max(px(0.05));
+        if error.x.abs() >= worth_moving {
             self.lead.x = (self.lead.x + error.x).clamp(px(0.), theme.max_input_inset);
         }
-        if error.y.abs() > px(0.05) {
+        if error.y.abs() >= worth_moving {
             self.lead.y = (self.lead.y + error.y).clamp(px(0.), theme.max_input_inset);
         }
     }
@@ -159,4 +169,73 @@ pub fn text_height(
         .map(|bounds| bounds.size.height)
         .unwrap_or(line_height)
         .max(line_height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui_kit::point;
+
+    fn tokens() -> EditorTheme {
+        EditorTheme::derive(&gpui_kit::component::Theme::default())
+    }
+
+    /// A display whose physical pixels are 0.9375 of a logical one, which is
+    /// what a 1.0667 scale factor gives.
+    const DEVICE_PIXEL: Pixels = px(0.9375);
+
+    #[test]
+    fn an_error_worth_more_than_a_pixel_is_corrected() {
+        let theme = tokens();
+        let mut fit = InputFit::new(&theme);
+        let before = fit.lead().x;
+
+        // The glyph landed ten pixels right of where the block put the box.
+        fit.observe_lead(
+            point(px(100.), px(50.)),
+            point(px(110.), px(50.)),
+            &theme,
+            DEVICE_PIXEL,
+        );
+
+        assert_eq!(fit.lead().x, before + px(10.));
+    }
+
+    #[test]
+    fn an_error_smaller_than_a_physical_pixel_is_left_alone() {
+        let theme = tokens();
+        let mut fit = InputFit::new(&theme);
+        let settled = fit.lead();
+
+        // Text is painted on the physical grid, so a fraction of a pixel is
+        // not an error the layout can pay off: acting on it moves the glyph
+        // a whole pixel the other way, and the document walks.
+        for error in [px(0.3125), px(-0.625), px(0.625), px(-0.3125)] {
+            fit.observe_lead(
+                point(px(100.), px(50.)),
+                point(px(100.) + error, px(50.) + error),
+                &theme,
+                DEVICE_PIXEL,
+            );
+            assert_eq!(fit.lead(), settled, "moved for an error of {error:?}");
+        }
+    }
+
+    #[test]
+    fn a_correction_settles_in_one_step_and_stays() {
+        let theme = tokens();
+        let mut fit = InputFit::new(&theme);
+        let slot = point(px(144.), px(48.));
+
+        // First frame: the input's own gutter puts the glyph ten pixels in.
+        fit.observe_lead(slot, slot + point(px(10.), px(0.)), &theme, DEVICE_PIXEL);
+        let settled = fit.lead();
+
+        // From then on the glyph lands within a physical pixel of the slot,
+        // wherever the grid rounds it, and the fit stops moving.
+        for residual in [px(0.625), px(-0.3125), px(0.625)] {
+            fit.observe_lead(slot, slot + point(residual, px(0.)), &theme, DEVICE_PIXEL);
+            assert_eq!(fit.lead(), settled);
+        }
+    }
 }

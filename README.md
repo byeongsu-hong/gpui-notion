@@ -72,7 +72,9 @@ a code-editor input reserves a line-number gutter even with line numbers off, an
 text area is snapped to whole device pixels. A text area a fraction short of its text
 scrolls inside itself as the caret moves between rows and the document rattles as it
 is clicked around; an unmeasured lead puts every paragraph a few pixels off the
-markers beside it. The width text wraps at and the line height markers align to are
+markers beside it. Both measurements are acted on only at the resolution of a physical
+pixel: text is painted on that grid, so a correction smaller than one does not remove
+the error, it trades it for another, and the page walks on the spot. The width text wraps at and the line height markers align to are
 read back from the input for the same reason.
 
 Inline formatting is painted by handing the input's decoration layer one
