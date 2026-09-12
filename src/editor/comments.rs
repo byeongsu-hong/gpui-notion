@@ -410,6 +410,9 @@ impl NotionEditor {
     ) -> Option<AnyElement> {
         let thread = self.open_thread?;
         let entry = self.comment_thread(thread)?;
+        if !self.block_is_on_screen(entry.block) {
+            return None;
+        }
         let position = self.comment_anchor(entry, cx)?;
         let draft = self.comment_draft.as_ref()?;
 

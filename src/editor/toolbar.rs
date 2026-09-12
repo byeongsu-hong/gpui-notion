@@ -57,7 +57,7 @@ impl super::view::NotionEditor {
         let Some((id, range)) = self.selection(cx) else {
             return false;
         };
-        if range.is_empty() {
+        if range.is_empty() || !self.block_is_on_screen(id) {
             return false;
         }
         self.index_of(id)

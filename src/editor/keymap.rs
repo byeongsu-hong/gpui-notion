@@ -27,7 +27,14 @@ impl NotionEditor {
         }
         let offset = (caret.origin.y - text_bounds.origin.y) / line_height;
         let row = offset.round().max(0.) as usize;
-        let rows = (text_bounds.size.height / line_height).round().max(1.) as usize;
+        // Count the rows of *text*, not of the box: a block's text area is
+        // deliberately a little taller than its text, and a caret on the last
+        // row of a box that has room to spare is still on the last row.
+        let text_height = state
+            .range_to_bounds(&(0..self.blocks[ix].text().len()))
+            .map(|bounds| bounds.size.height)
+            .unwrap_or(text_bounds.size.height);
+        let rows = (text_height / line_height).round().max(1.) as usize;
         Some((row, rows))
     }
 

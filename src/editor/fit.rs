@@ -61,12 +61,6 @@ impl InputFit {
         text + self.inset
     }
 
-    /// How much taller that is than the assumed padding — space that reads as
-    /// a gap under the text and can come off a neighbouring margin.
-    pub fn surplus(&self) -> Pixels {
-        (self.inset - style::INPUT_PAD_Y * 2.).max(px(0.))
-    }
-
     /// The height this input takes out of the box it is given.
     pub fn inset(&self) -> Pixels {
         self.inset

@@ -1003,20 +1003,15 @@ impl NotionEditor {
             spec.wrap(&ctx, inner, window, cx)
         };
 
-        // Whatever slack the block above keeps under its text already reads
-        // as a gap, so it comes off this block's margin and the rhythm stays
-        // the one the layout asks for.
-        let above = if ix == 0 {
-            px(0.)
-        } else {
-            self.blocks[ix - 1].fit.surplus()
-        };
+        // The text wrapper cancels the input's inset on both sides, so a
+        // block occupies exactly its text and these margins are the ones the
+        // layout asks for, with nothing to trim back.
         let margin_top = if ix == 0 {
             px(0.)
         } else if layout.collapse_with_siblings && self.blocks[ix - 1].ty == self.blocks[ix].ty {
-            (px(2.) - above).max(px(0.))
+            px(2.)
         } else {
-            (layout.margin_top - above).max(px(0.))
+            layout.margin_top
         };
 
         let selected = self.selected.contains(&id);
@@ -1056,6 +1051,12 @@ impl NotionEditor {
                 this.on_drop_block(dragged, cx)
             }))
             .into_any_element()
+    }
+
+    /// Whether a block is being rendered at all — a block inside a collapsed
+    /// toggle is not, and nothing may be anchored to it.
+    pub(crate) fn block_is_on_screen(&self, id: BlockId) -> bool {
+        self.index_of(id).is_some_and(|ix| self.is_visible(ix))
     }
 
     /// Where a block sits on screen as of the last frame.
