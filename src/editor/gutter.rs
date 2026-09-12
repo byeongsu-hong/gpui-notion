@@ -77,7 +77,9 @@ impl NotionEditor {
 
         let mut controls = div()
             .absolute()
-            .left(px(4.))
+            // The controls track the block's indentation, so they stay the
+            // same distance from its text however deeply it is nested.
+            .left(px(4.) + super::style::INDENT_WIDTH * block.indent() as f32)
             .top(top)
             .h(px(24.))
             .flex()

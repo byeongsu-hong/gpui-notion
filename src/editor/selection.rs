@@ -171,6 +171,11 @@ impl NotionEditor {
         cx.write_to_clipboard(ClipboardItem::new_string(markdown));
     }
 
+    /// Whether a press is still down inside the document.
+    pub fn press_in_progress(&self) -> bool {
+        self.mouse_anchor.is_some()
+    }
+
     /// The block under a pointer position: the one it is inside, else the
     /// nearest one above or below, so a drag into the margins still lands.
     pub(crate) fn block_at_point(&self, position: Point<Pixels>) -> Option<BlockId> {

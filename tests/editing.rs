@@ -1119,3 +1119,47 @@ fn a_table_copies_as_a_markdown_table(cx: &mut TestAppContext) {
     );
     assert!(markdown.contains("| --- | --- |"));
 }
+
+#[gpui_kit::test]
+fn the_toolbar_waits_for_the_button_to_come_up(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("select me", cx);
+
+    // Mid-drag the toolbar stays away, however much text is covered.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = window.find(("block", 1usize)).bounds();
+        window.dispatch_event(
+            gpui_kit::PlatformInput::MouseDown(gpui_kit::MouseDownEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: bounds.center(),
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(cx.update(|cx| harness.editor.read(cx).press_in_progress()));
+    assert!(!cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+
+    // Once the button comes up a selection shows it again.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.dispatch_event(
+            gpui_kit::PlatformInput::MouseUp(gpui_kit::MouseUpEvent {
+                button: gpui_kit::MouseButton::Left,
+                position: window.find(("block", 1usize)).bounds().center(),
+                modifiers: Default::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+        window.render_frame(cx);
+        window.press("secondary-a", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    assert!(cx.update(|cx| harness.editor.read(cx).selection_toolbar_visible(cx)));
+}

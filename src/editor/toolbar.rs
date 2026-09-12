@@ -33,6 +33,12 @@ impl super::view::NotionEditor {
         if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
+        // While the button is still down the selection is still being made;
+        // the toolbar waits for it to be let go rather than flickering along
+        // with the pointer.
+        if self.press_in_progress() {
+            return false;
+        }
         if self.has_block_selection() {
             return true;
         }
