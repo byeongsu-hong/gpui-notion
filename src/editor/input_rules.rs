@@ -264,7 +264,7 @@ impl NotionEditor {
 pub fn attrs_from_capture(caps: &regex::Captures, name: &str) -> BlockAttrs {
     let mut attrs = BlockAttrs::default();
     if let Some(value) = caps.name(name) {
-        attrs.set(name.to_string(), value.as_str().to_string());
+        attrs.set_extra(name.to_string(), value.as_str().to_string());
     }
     attrs
 }

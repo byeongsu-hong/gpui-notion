@@ -74,11 +74,13 @@ impl BlockAttrs {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&SharedString> {
+    /// Read an attribute a block extension defined for itself.
+    pub fn extra(&self, key: &str) -> Option<&SharedString> {
         self.extra.get(key)
     }
 
-    pub fn set(&mut self, key: impl Into<SharedString>, value: impl Into<SharedString>) {
+    /// Set an attribute a block extension defined for itself.
+    pub fn set_extra(&mut self, key: impl Into<SharedString>, value: impl Into<SharedString>) {
         self.extra.insert(key.into(), value.into());
     }
 }
@@ -202,7 +204,8 @@ pub struct SlashItem {
 /// Everything a spec needs to render one block.
 pub struct BlockContext<'a> {
     pub id: BlockId,
-    pub index: usize,
+    /// Index of the block in the document.
+    pub ix: usize,
     pub attrs: &'a BlockAttrs,
     pub text: &'a str,
     pub indent: usize,
@@ -383,21 +386,36 @@ pub struct Block {
     pub ty: BlockType,
     pub attrs: BlockAttrs,
     /// Mirror of the input's text, kept in step to diff edits for marks.
-    pub text: String,
-    pub marks: MarkList,
+    pub(crate) text: String,
+    pub(crate) marks: MarkList,
     /// Marks applied to the next typed character at a collapsed caret.
-    pub stored_marks: Option<Vec<MarkKind>>,
-    pub state: Entity<EditorState>,
-    pub decorations: Option<TextDecorationCollection>,
+    pub(crate) stored_marks: Option<Vec<MarkKind>>,
+    pub(crate) state: Entity<EditorState>,
+    pub(crate) decorations: Option<TextDecorationCollection>,
     /// Nesting depth inside lists; 0 at the top level.
-    pub indent: usize,
+    pub(crate) indent: usize,
     /// Rows the text wraps into at the current column width. Measuring text
     /// is not free, so it is done when the text changes, not every frame.
     pub(crate) rows: usize,
-    pub subscriptions: Vec<Subscription>,
+    pub(crate) subscriptions: Vec<Subscription>,
 }
 
 impl Block {
+    /// Text of the block, as the document holds it.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Inline formatting of the block.
+    pub fn marks(&self) -> &MarkList {
+        &self.marks
+    }
+
+    /// Nesting depth inside lists.
+    pub fn indent(&self) -> usize {
+        self.indent
+    }
+
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }

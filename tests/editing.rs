@@ -109,7 +109,7 @@ impl Harness {
             let editor = self.editor.read(cx);
             let id = editor.focused_id()?;
             let ix = editor.index_of(id)?;
-            let offset = editor.block(id)?.state.read(cx).cursor();
+            let offset = editor.caret_offset(id, cx)?;
             Some((ix, offset))
         })
     }

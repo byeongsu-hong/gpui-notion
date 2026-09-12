@@ -197,6 +197,11 @@ impl NotionEditor {
             .is_some_and(|block| block.ty == types::PARAGRAPH && block.text.is_empty())
     }
 
+    /// Caret offset inside a block, in bytes.
+    pub fn caret_offset(&self, id: BlockId, cx: &App) -> Option<usize> {
+        Some(self.block(id)?.state.read(cx).cursor())
+    }
+
     /// Id of the block at `ix`, for tests and hosts.
     pub fn block_id_at(&self, ix: usize) -> Option<BlockId> {
         self.blocks.get(ix).map(|block| block.id)
@@ -665,7 +670,7 @@ impl NotionEditor {
         let block = &self.blocks[ix];
         BlockContext {
             id: block.id,
-            index: ix,
+            ix,
             attrs: &block.attrs,
             text: &block.text,
             indent: block.indent,
