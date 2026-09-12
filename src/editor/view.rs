@@ -1,0 +1,743 @@
+//! The editor view: the document, its blocks, and everything that happens to
+//! them. State lives in one entity, the way GPUI wants it; each block owns a
+//! child `EditorState` entity for its own text.
+
+use std::ops::Range;
+use std::sync::Arc;
+
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::input::{Editor, EditorState, InputEvent};
+use gpui_kit::DragMoveEvent;
+use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, Font,
+    FontStyle, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, LineFragment,
+    ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    StrikethroughStyle, Styled as _, UnderlineStyle, Window, div, px, relative,
+};
+
+use super::actions;
+use super::block::{
+    Block, BlockAttrs, BlockContext, BlockContent, BlockId, BlockLayout, BlockRegistry, BlockSpec,
+    BlockType, types,
+};
+use super::gutter::DraggedBlock;
+use super::mark::{MarkKind, diff_edit};
+use super::style;
+
+/// Emitted when the document changes, so a host can persist it.
+pub struct DocumentChanged;
+
+pub struct NotionEditor {
+    pub(crate) blocks: Vec<Block>,
+    next_id: u64,
+    focus_handle: FocusHandle,
+    /// Block whose input currently holds focus.
+    pub(crate) focused: Option<BlockId>,
+    /// Block under the pointer, which shows its gutter controls.
+    pub(crate) hovered: Option<BlockId>,
+    /// Blocks selected as nodes, e.g. by a drag or Escape.
+    pub(crate) selected: Vec<BlockId>,
+    /// Width the text column last laid out at, for wrapping measurements.
+    pub(crate) wrap_width: Pixels,
+    /// The open slash menu, if any.
+    pub(crate) slash: Option<super::slash::SlashMenu>,
+    /// Where a dragged block would land.
+    pub(crate) drop_target: Option<super::gutter::DropTarget>,
+}
+
+impl NotionEditor {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let mut this = Self {
+            blocks: Vec::new(),
+            next_id: 1,
+            focus_handle: cx.focus_handle(),
+            focused: None,
+            hovered: None,
+            selected: Vec::new(),
+            wrap_width: style::PAGE_WIDTH - style::PAGE_PADDING * 2.,
+            slash: None,
+            drop_target: None,
+        };
+        this.insert_block(0, BlockContent::paragraph(""), window, cx);
+        this
+    }
+
+    /// Build an editor holding `content`.
+    pub fn with_content(
+        content: Vec<BlockContent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(window, cx);
+        if !content.is_empty() {
+            this.blocks.clear();
+            for (ix, block) in content.into_iter().enumerate() {
+                this.insert_block(ix, block, window, cx);
+            }
+        }
+        this
+    }
+
+    // ---------------------------------------------------------------- lookup
+
+    pub fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn index_of(&self, id: BlockId) -> Option<usize> {
+        self.blocks.iter().position(|b| b.id == id)
+    }
+
+    pub fn block(&self, id: BlockId) -> Option<&Block> {
+        self.blocks.iter().find(|b| b.id == id)
+    }
+
+    pub fn block_mut(&mut self, id: BlockId) -> Option<&mut Block> {
+        self.blocks.iter_mut().find(|b| b.id == id)
+    }
+
+    pub fn spec_at(&self, ix: usize, cx: &App) -> Arc<dyn BlockSpec> {
+        BlockRegistry::global(cx).get(&self.blocks[ix].ty)
+    }
+
+    /// The block that commands act on: the focused one, else the first.
+    pub fn active_id(&self) -> Option<BlockId> {
+        self.focused
+            .or_else(|| self.selected.first().copied())
+            .or_else(|| self.blocks.first().map(|b| b.id))
+    }
+
+    pub fn active_index(&self) -> Option<usize> {
+        self.active_id().and_then(|id| self.index_of(id))
+    }
+
+    /// Caret or selection in the active block, in byte offsets.
+    pub fn selection(&self, cx: &App) -> Option<(BlockId, Range<usize>)> {
+        let id = self.active_id()?;
+        let block = self.block(id)?;
+        Some((id, block.state.read(cx).selected_range()))
+    }
+
+    pub fn content(&self) -> Vec<BlockContent> {
+        self.blocks.iter().map(|b| b.content()).collect()
+    }
+
+    // ------------------------------------------------------- block lifecycle
+
+    fn new_id(&mut self) -> BlockId {
+        let id = BlockId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    fn make_state(
+        &self,
+        ty: &str,
+        attrs: &BlockAttrs,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
+        let spec = BlockRegistry::global(cx).get(ty);
+        let caps = spec.caps();
+        let placeholder = spec.placeholder(attrs);
+        let language = attrs
+            .language
+            .clone()
+            .unwrap_or(SharedString::new_static("plaintext"));
+        let text = text.to_string();
+
+        cx.new(|cx| {
+            EditorState::new(window, cx)
+                .line_number(false)
+                .folding(false)
+                .indent_guides(false)
+                .auto_close(caps.multiline)
+                .smart_indent(caps.multiline)
+                .soft_wrap(true)
+                .searchable(false)
+                .scroll_beyond_last_line(Some(0))
+                .language(language)
+                .placeholder(placeholder)
+                .default_value(text)
+        })
+    }
+
+    fn subscribe_to_block(
+        &self,
+        id: BlockId,
+        state: &Entity<EditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui_kit::Subscription> {
+        vec![cx.subscribe_in(
+            state,
+            window,
+            move |this, _state, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => this.on_block_changed(id, window, cx),
+                InputEvent::Focus => {
+                    this.focused = Some(id);
+                    this.selected.clear();
+                    cx.notify();
+                }
+                _ => {}
+            },
+        )]
+    }
+
+    /// Insert a block at `ix` and return its id.
+    pub fn insert_block(
+        &mut self,
+        ix: usize,
+        content: BlockContent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> BlockId {
+        let id = self.new_id();
+        let state = self.make_state(&content.ty, &content.attrs, &content.text, window, cx);
+        let subscriptions = self.subscribe_to_block(id, &state, window, cx);
+
+        let mut block = Block {
+            id,
+            ty: content.ty,
+            attrs: content.attrs,
+            text: content.text,
+            marks: content.marks,
+            stored_marks: None,
+            state,
+            decorations: None,
+            indent: content.indent,
+            subscriptions,
+        };
+        block.marks.clamp(block.text.len());
+
+        let ix = ix.min(self.blocks.len());
+        self.blocks.insert(ix, block);
+        self.apply_decorations(id, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+        id
+    }
+
+    pub fn remove_block(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        let Some(ix) = self.index_of(id) else { return };
+        self.blocks.remove(ix);
+        if self.focused == Some(id) {
+            self.focused = None;
+        }
+        self.selected.retain(|s| *s != id);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    /// Replace a block's node type, keeping its text and marks.
+    pub fn set_block_type(
+        &mut self,
+        id: BlockId,
+        ty: BlockType,
+        attrs: BlockAttrs,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.index_of(id) else { return };
+        if self.blocks[ix].ty == ty && self.blocks[ix].attrs == attrs {
+            return;
+        }
+
+        let spec = BlockRegistry::global(cx).get(&ty);
+        let caps = spec.caps();
+        let was_multiline = self.spec_at(ix, cx).caps().multiline;
+
+        self.blocks[ix].ty = ty.clone();
+        self.blocks[ix].attrs = attrs;
+        if !caps.marks {
+            self.blocks[ix].marks.clear();
+        }
+        if !caps.list {
+            self.blocks[ix].indent = 0;
+        }
+
+        // A code block edits differently from prose, so it needs a fresh state.
+        if was_multiline != caps.multiline {
+            let text = self.blocks[ix].text.clone();
+            let attrs = self.blocks[ix].attrs.clone();
+            let state = self.make_state(&ty, &attrs, &text, window, cx);
+            let subscriptions = self.subscribe_to_block(id, &state, window, cx);
+            self.blocks[ix].state = state;
+            self.blocks[ix].subscriptions = subscriptions;
+            self.blocks[ix].decorations = None;
+        } else {
+            let placeholder = spec.placeholder(&self.blocks[ix].attrs);
+            self.blocks[ix]
+                .state
+                .update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
+        }
+
+        self.apply_decorations(id, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    // ------------------------------------------------------------- edit sync
+
+    /// Keep the block's mirror, marks and decorations in step with its input.
+    fn on_block_changed(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(ix) = self.index_of(id) else { return };
+        let new_text = self.blocks[ix].state.read(cx).value().to_string();
+        if new_text == self.blocks[ix].text {
+            return;
+        }
+        let old_text = std::mem::replace(&mut self.blocks[ix].text, new_text.clone());
+
+        if let Some(edit) = diff_edit(&old_text, &new_text) {
+            self.blocks[ix].marks.remap(&edit);
+            // Marks armed at an empty caret apply to what was just typed.
+            if let Some(stored) = self.blocks[ix].stored_marks.take()
+                && edit.new_len > 0
+            {
+                let range = edit.range.start..edit.range.start + edit.new_len;
+                for kind in stored {
+                    self.blocks[ix].marks.add(kind, range.clone());
+                }
+            }
+            self.blocks[ix].marks.clamp(new_text.len());
+        }
+
+        self.apply_decorations(id, cx);
+        self.run_input_rules(id, window, cx);
+        self.sync_slash_menu(window, cx);
+        cx.emit(DocumentChanged);
+        cx.notify();
+    }
+
+    /// Push the block's marks into the input's decoration layer.
+    pub(crate) fn apply_decorations(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        let Some(ix) = self.index_of(id) else { return };
+        let layout = self.layout_at(ix, cx);
+        let mut runs = self.blocks[ix].marks.runs();
+        if layout.strikethrough {
+            runs = vec![(0..self.blocks[ix].text.len(), vec![MarkKind::Strike])];
+        }
+
+        let decorations: Vec<_> = runs
+            .into_iter()
+            .map(|(range, kinds)| {
+                gpui_kit::component::input::TextDecoration::new(range, highlight_style(&kinds, cx))
+            })
+            .collect();
+
+        let collection = match self.blocks[ix].decorations.clone() {
+            Some(collection) => collection,
+            None => {
+                let state = self.blocks[ix].state.clone();
+                let collection = state.update(cx, |state, cx| {
+                    state.create_decorations_collection(Vec::new(), cx)
+                });
+                self.blocks[ix].decorations = Some(collection.clone());
+                collection
+            }
+        };
+        collection.set(decorations, cx);
+    }
+
+    // ----------------------------------------------------------------- focus
+
+    pub fn focus_block(
+        &mut self,
+        id: BlockId,
+        caret: Caret,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ix) = self.index_of(id) else { return };
+        if !self.spec_at(ix, cx).caps().textual {
+            self.focused = None;
+            self.selected = vec![id];
+            self.focus_handle.focus(window, cx);
+            cx.notify();
+            return;
+        }
+        let len = self.blocks[ix].text.len();
+        let offset = match caret {
+            Caret::Start => 0,
+            Caret::End => len,
+            Caret::At(offset) => offset.min(len),
+        };
+        self.focused = Some(id);
+        self.selected.clear();
+        self.blocks[ix].state.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.set_selected_range(offset..offset, cx);
+        });
+        cx.notify();
+    }
+
+    /// Move focus to the next or previous textual block.
+    pub(crate) fn focus_sibling(
+        &mut self,
+        from: usize,
+        delta: isize,
+        caret: Caret,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut ix = from as isize + delta;
+        while ix >= 0 && (ix as usize) < self.blocks.len() {
+            let ix_usize = ix as usize;
+            if self.spec_at(ix_usize, cx).caps().textual && self.is_visible(ix_usize) {
+                let id = self.blocks[ix_usize].id;
+                self.focus_block(id, caret, window, cx);
+                return true;
+            }
+            ix += delta;
+        }
+        false
+    }
+
+    /// Whether a block is shown, i.e. no collapsed toggle encloses it.
+    pub(crate) fn is_visible(&self, ix: usize) -> bool {
+        let indent = self.blocks[ix].indent;
+        self.blocks[..ix].iter().rev().any(|b| b.indent < indent && b.attrs.collapsed)
+            == false
+    }
+
+    pub fn toggle_collapsed(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        let Some(block) = self.block_mut(id) else {
+            return;
+        };
+        block.attrs.collapsed = !block.attrs.collapsed;
+        cx.notify();
+    }
+
+    // ------------------------------------------------------------ measurement
+
+    pub(crate) fn layout_at(&self, ix: usize, cx: &App) -> BlockLayout {
+        let block = &self.blocks[ix];
+        BlockRegistry::global(cx).get(&block.ty).layout(&block.attrs)
+    }
+
+    fn block_font(&self, layout: &BlockLayout, cx: &App) -> Font {
+        let family = if layout.mono {
+            cx.theme().mono_font_family.clone()
+        } else {
+            cx.theme().font_family.clone()
+        };
+        let mut font = gpui_kit::font(family);
+        font.weight = layout.font_weight;
+        font
+    }
+
+    /// Rows the text wraps into at the current column width.
+    fn measure_rows(&self, ix: usize, layout: &BlockLayout, cx: &App) -> usize {
+        let block = &self.blocks[ix];
+        let wrap_width = self.wrap_width
+            - style::INDENT_WIDTH * block.indent as f32
+            - layout.leading_width
+            - layout.inner_padding * 2.;
+        if wrap_width <= px(1.) {
+            return 1;
+        }
+
+        let font = self.block_font(layout, cx);
+        let mut wrapper = cx.text_system().line_wrapper(font, layout.text_size);
+        block
+            .text
+            .split('\n')
+            .map(|line| {
+                if line.is_empty() {
+                    return 1;
+                }
+                1 + wrapper
+                    .wrap_line(&[LineFragment::text(line)], wrap_width)
+                    .count()
+            })
+            .sum::<usize>()
+            .max(1)
+    }
+
+    pub(crate) fn block_height(&self, ix: usize, layout: &BlockLayout, cx: &App) -> Pixels {
+        layout.line_height_px() * self.measure_rows(ix, layout, cx) as f32
+    }
+
+    // ------------------------------------------------------------- rendering
+
+    fn block_context(&self, ix: usize, cx: &Context<Self>) -> BlockContext<'_> {
+        let block = &self.blocks[ix];
+        BlockContext {
+            id: block.id,
+            index: ix,
+            attrs: &block.attrs,
+            text: &block.text,
+            indent: block.indent,
+            focused: self.focused == Some(block.id),
+            selected: self.selected.contains(&block.id),
+            ordinal: self.list_ordinal(ix),
+            editor: cx.entity().downgrade(),
+        }
+    }
+
+    fn render_text(&self, ix: usize, layout: &BlockLayout, cx: &mut Context<Self>) -> AnyElement {
+        let block = &self.blocks[ix];
+        let height = self.block_height(ix, layout, cx);
+        let family = if layout.mono {
+            cx.theme().mono_font_family.clone()
+        } else {
+            cx.theme().font_family.clone()
+        };
+        let mut color = cx.theme().foreground;
+        color.a *= layout.text_opacity;
+
+        Editor::new(&block.state)
+            .appearance(false)
+            .bordered(false)
+            .h(height)
+            .font_family(family)
+            .text_size(layout.text_size)
+            .font_weight(layout.font_weight)
+            .line_height(relative(layout.line_height))
+            .text_color(color)
+            .p_0()
+            .into_any_element()
+    }
+
+    fn render_block(&self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let spec = self.spec_at(ix, cx);
+        let layout = spec.layout(&self.blocks[ix].attrs);
+        let id = self.blocks[ix].id;
+        let indent = self.blocks[ix].indent;
+
+        let body = {
+            let ctx = self.block_context(ix, cx);
+            spec.render_body(&ctx, window, cx)
+        };
+        let content = match body {
+            Some(body) => body,
+            None => self.render_text(ix, &layout, cx),
+        };
+
+        let leading = {
+            let ctx = self.block_context(ix, cx);
+            spec.render_leading(&ctx, window, cx)
+        };
+
+        let inner = h_flex()
+            .w_full()
+            .items_start()
+            .when_some(leading, |this, leading| this.child(leading))
+            .child(div().flex_1().min_w(px(0.)).child(content))
+            .into_any_element();
+
+        let wrapped = {
+            let ctx = self.block_context(ix, cx);
+            spec.wrap(&ctx, inner, window, cx)
+        };
+
+        let margin_top = if ix == 0 {
+            px(0.)
+        } else if layout.collapse_with_siblings && self.blocks[ix - 1].ty == self.blocks[ix].ty {
+            px(2.)
+        } else {
+            layout.margin_top
+        };
+
+        let selected = self.selected.contains(&id);
+        let gutter = self.render_gutter(ix, window, cx);
+        let indicator = self.drop_indicator(ix, cx);
+
+        div()
+            .id(("block", id.0 as usize))
+            .group(group_name(id))
+            .relative()
+            .w_full()
+            .mt(margin_top)
+            .mb(layout.margin_bottom)
+            .pl(style::INDENT_WIDTH * indent as f32)
+            .when(selected, |this| {
+                this.rounded(px(4.)).bg(cx.theme().selection.opacity(0.4))
+            })
+            .child(gutter)
+            .child(wrapped)
+            .children(indicator)
+            .on_drag_move(cx.listener(move |this, event: &DragMoveEvent<DraggedBlock>, _, cx| {
+                this.on_drag_over(ix, event, cx)
+            }))
+            .on_drop(cx.listener(move |this, dragged: &DraggedBlock, _, cx| {
+                this.on_drop_block(dragged, cx)
+            }))
+            .into_any_element()
+    }
+
+    /// Ordinal of an ordered-list item within its run at the same indent.
+    fn list_ordinal(&self, ix: usize) -> usize {
+        let block = &self.blocks[ix];
+        let mut n = block.attrs.start.unwrap_or(1);
+        for prev in self.blocks[..ix].iter().rev() {
+            if prev.indent < block.indent {
+                break;
+            }
+            if prev.indent > block.indent {
+                continue;
+            }
+            if prev.ty == block.ty {
+                n += 1;
+                if let Some(start) = prev.attrs.start {
+                    return n + start - 1;
+                }
+            } else {
+                break;
+            }
+        }
+        n
+    }
+}
+
+/// Where a caret lands when focus moves to a block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caret {
+    Start,
+    End,
+    At(usize),
+}
+
+pub(crate) fn group_name(id: BlockId) -> SharedString {
+    SharedString::from(format!("block-{}", id.0))
+}
+
+/// Turn a run's marks into the style the decoration layer paints.
+pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
+    let mut style = HighlightStyle::default();
+    for kind in kinds {
+        match kind {
+            MarkKind::Bold => style.font_weight = Some(FontWeight::BOLD),
+            MarkKind::Italic => style.font_style = Some(FontStyle::Italic),
+            MarkKind::Underline => {
+                style.underline = Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: None,
+                    wavy: false,
+                })
+            }
+            MarkKind::Strike => {
+                style.strikethrough = Some(StrikethroughStyle {
+                    thickness: px(1.),
+                    color: None,
+                })
+            }
+            MarkKind::Code => {
+                style.background_color = Some(style::code_background(cx));
+                style.color = Some(style::code_foreground(cx));
+            }
+            MarkKind::Link(_) => {
+                style.color = Some(style::link_color(cx));
+                style.underline = Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: None,
+                    wavy: false,
+                });
+            }
+            MarkKind::Highlight(color) => {
+                style.background_color = Some(style::highlight_fill(*color, cx))
+            }
+            MarkKind::TextColor(color) => style.color = style::text_color_value(*color, cx),
+            MarkKind::Superscript | MarkKind::Subscript => {}
+        }
+    }
+    style
+}
+
+impl EventEmitter<DocumentChanged> for NotionEditor {}
+
+impl Focusable for NotionEditor {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for NotionEditor {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let visible: Vec<usize> = (0..self.blocks.len())
+            .filter(|ix| self.is_visible(*ix))
+            .collect();
+        let blocks: Vec<AnyElement> = visible
+            .into_iter()
+            .map(|ix| self.render_block(ix, window, cx))
+            .collect();
+
+        let root = div()
+            .key_context(actions::CONTEXT)
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground);
+
+        self.with_key_handlers(root, cx)
+            .child(
+                v_flex()
+                    .id("page")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .items_center()
+                    .child(
+                        v_flex()
+                            .w(style::PAGE_WIDTH)
+                            .px(style::PAGE_PADDING)
+                            .pt(style::PAGE_PADDING)
+                            .children(blocks)
+                            .child(
+                                // Clicking the space under the document puts
+                                // the caret in a trailing paragraph.
+                                div()
+                                    .id("trailing-space")
+                                    .w_full()
+                                    .h(style::PAGE_BOTTOM)
+                                    .cursor_text()
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.focus_trailing_block(window, cx)
+                                    })),
+                            ),
+                    ),
+            )
+            .children(self.render_slash_menu(window, cx))
+    }
+}
+
+impl NotionEditor {
+    /// Put the caret in the last block, appending a paragraph when the last
+    /// block cannot hold one, the way clicking under a Notion page does.
+    pub fn focus_trailing_block(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let last = self.blocks.len().saturating_sub(1);
+        let textual = self
+            .blocks
+            .get(last)
+            .map(|b| BlockRegistry::global(cx).get(&b.ty).caps().textual)
+            .unwrap_or(false);
+        let empty = self.blocks.get(last).map(|b| b.is_empty()).unwrap_or(true);
+
+        if textual && empty {
+            let id = self.blocks[last].id;
+            self.focus_block(id, Caret::End, window, cx);
+            return;
+        }
+        let id = self.insert_block(self.blocks.len(), BlockContent::paragraph(""), window, cx);
+        self.focus_block(id, Caret::End, window, cx);
+    }
+
+    /// The editor's own focus handle, for node selection.
+    pub(crate) fn focus_handle_for_editor(&self) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+
+    /// Ordinal helper used by list specs and tests.
+    pub fn ordinal_at(&self, ix: usize) -> usize {
+        self.list_ordinal(ix)
+    }
+
+    /// Type name of a block, for tests and hosts.
+    pub fn block_type(&self, ix: usize) -> &str {
+        self.blocks
+            .get(ix)
+            .map(|b| b.ty.as_ref())
+            .unwrap_or(types::PARAGRAPH)
+    }
+}
