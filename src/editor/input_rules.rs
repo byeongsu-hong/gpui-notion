@@ -15,6 +15,14 @@ use super::block::{BlockAttrs, BlockId, BlockRegistry};
 use super::mark::MarkKind;
 use super::view::{Caret, NotionEditor};
 
+/// Chooses who interprets source text typed into the editor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InputRuleMode {
+    #[default]
+    BuiltIn,
+    Application,
+}
+
 /// Compiled regexes, shared across blocks and edits.
 fn regex_for(pattern: &str) -> Regex {
     static CACHE: OnceLock<Mutex<HashMap<String, Regex>>> = OnceLock::new();
@@ -85,6 +93,10 @@ const TYPOGRAPHY_RULES: &[(&str, &str)] = &[
 ];
 
 impl NotionEditor {
+    pub fn set_input_rule_mode(&mut self, mode: InputRuleMode) {
+        self.input_rule_mode = mode;
+    }
+
     /// Convert a whole line that begins with a markdown prefix, the way a
     /// pasted document's lines are read. Unlike typing, the rest of the line
     /// is already there, so the rule only has to match its start.
@@ -94,6 +106,10 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let application_owned = self.input_rule_mode == InputRuleMode::Application;
+        if application_owned {
+            return false;
+        }
         let Some(ix) = self.index_of(id) else {
             return false;
         };
@@ -133,6 +149,10 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let application_owned = self.input_rule_mode == InputRuleMode::Application;
+        if application_owned {
+            return false;
+        }
         let Some(ix) = self.index_of(id) else {
             return false;
         };

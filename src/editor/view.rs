@@ -67,6 +67,7 @@ pub struct NotionEditor {
     /// The open suggestion menu, if any.
     pub(crate) suggestion: Option<super::slash::SuggestionMenu>,
     pub(crate) menu_source: super::slash::MenuSource,
+    pub(crate) input_rule_mode: super::input_rules::InputRuleMode,
     /// People offered by the `@` menu.
     pub(crate) mentions: Vec<super::suggestion::Mention>,
     /// Where a dragged block would land.
@@ -100,6 +101,7 @@ impl NotionEditor {
             wrap_width: cx.editor_theme().page_width - cx.editor_theme().page_padding * 2.,
             suggestion: None,
             menu_source: Default::default(),
+            input_rule_mode: Default::default(),
             mentions: super::suggestion::default_mentions(),
             drop_target: None,
             link_editor: None,

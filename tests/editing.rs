@@ -2199,3 +2199,41 @@ fn caret_changes_are_observed_without_turning_repaints_into_edits(cx: &mut TestA
     assert_eq!(*events.borrow(), vec!["selection", "selection"]);
     assert_eq!(harness.texts(cx), vec!["hello"]);
 }
+
+#[gpui_kit::test]
+fn application_input_rules_leave_typed_and_pasted_source_unchanged(cx: &mut TestAppContext) {
+    use gpui_notion::editor::input_rules::InputRuleMode;
+    for source in ["# Title", "**bold**", "(c)"] {
+        let harness = setup(cx);
+        harness.ui(cx, |_, cx| {
+            harness.editor.update(cx, |editor, _| {
+                editor.set_input_rule_mode(InputRuleMode::Application);
+            })
+        });
+        harness.type_text(source, cx);
+        assert_eq!(
+            harness.texts(cx).join("\n"),
+            source,
+            "source belongs to the application"
+        );
+        assert!(harness.types(cx).iter().all(|kind| kind == "paragraph"));
+        cx.update(|cx| {
+            assert!(
+                harness.editor.read(cx).content().iter().all(|block| block
+                    .marks
+                    .iter()
+                    .next()
+                    .is_none())
+            )
+        });
+    }
+    let harness = setup(cx);
+    harness.ui(cx, |_, cx| {
+        harness.editor.update(cx, |editor, _| {
+            editor.set_input_rule_mode(InputRuleMode::Application);
+        })
+    });
+    harness.ui(cx, |window, cx| window.input("first\n# second", cx));
+    assert_eq!(harness.texts(cx), vec!["first", "# second"]);
+    assert_eq!(harness.types(cx), vec!["paragraph", "paragraph"]);
+}
