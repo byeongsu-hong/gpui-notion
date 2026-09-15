@@ -2113,3 +2113,89 @@ fn external_annotations_emit_selection_without_private_threads(cx: &mut TestAppC
     assert_eq!(events.borrow().len(), 1);
     assert_eq!(events.borrow()[0].range, 0..5);
 }
+
+#[gpui_kit::test]
+fn application_suggestions_do_not_run_native_trigger_or_replacement_rules(cx: &mut TestAppContext) {
+    use gpui_notion::editor::slash::{ApplicationMenu, ApplicationMenuAnchor, MenuAction};
+    use gpui_notion::editor::toolbar::ToolbarItem;
+    let harness = setup(cx);
+    harness.ui(cx, |_, cx| {
+        harness
+            .editor
+            .update(cx, |editor, cx| editor.set_application_menu(None, cx))
+    });
+    harness.type_text("@", cx);
+    assert!(
+        !cx.update(|cx| harness.editor.read(cx).suggestion_is_open()),
+        "the application owns trigger detection"
+    );
+    let actions = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let captured = actions.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&harness.editor, move |_, action: &MenuAction, _| {
+            captured.lock().unwrap().push(action.clone());
+        })
+    });
+    harness.ui(cx, |window, cx| window.click(("block", 1usize), cx));
+    assert!(
+        actions.lock().unwrap().is_empty(),
+        "a closed menu has nothing to dismiss"
+    );
+    harness.ui(cx, |_, cx| {
+        harness.editor.update(cx, |editor, cx| {
+            editor.set_application_menu(
+                Some(ApplicationMenu {
+                    anchor: ApplicationMenuAnchor::Caret,
+                    items: vec![ToolbarItem {
+                        tag: "opaque-action".into(),
+                        label: "Application choice".into(),
+                    }],
+                    selected: 0,
+                }),
+                cx,
+            )
+        })
+    });
+    assert!(cx.update(|cx| harness.editor.read(cx).suggestion_is_open()));
+    harness.press("enter", cx);
+    assert_eq!(
+        harness.texts(cx),
+        vec!["@"],
+        "a menu pick never replaces source text"
+    );
+    assert_eq!(
+        *actions.lock().unwrap(),
+        vec![MenuAction::Pick("opaque-action".into())]
+    );
+}
+
+#[gpui_kit::test]
+fn caret_changes_are_observed_without_turning_repaints_into_edits(cx: &mut TestAppContext) {
+    use gpui_notion::editor::view::{DocumentChanged, SelectionChanged};
+    let harness = setup(cx);
+    harness.type_text("hello", cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let selections = events.clone();
+    let documents = events.clone();
+    let _selection = cx.update(|cx| {
+        cx.subscribe(&harness.editor, move |_, _: &SelectionChanged, _| {
+            selections.borrow_mut().push("selection");
+        })
+    });
+    let _document = cx.update(|cx| {
+        cx.subscribe(&harness.editor, move |_, _: &DocumentChanged, _| {
+            documents.borrow_mut().push("document");
+        })
+    });
+    harness.press("left", cx);
+    assert_eq!(*events.borrow(), vec!["selection"]);
+    harness.ui(cx, |_, _| {});
+    assert_eq!(
+        *events.borrow(),
+        vec!["selection"],
+        "a repaint changes no selection"
+    );
+    harness.press("shift-left", cx);
+    assert_eq!(*events.borrow(), vec!["selection", "selection"]);
+    assert_eq!(harness.texts(cx), vec!["hello"]);
+}

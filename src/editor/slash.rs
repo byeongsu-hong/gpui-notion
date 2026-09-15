@@ -5,6 +5,7 @@
 //! Escape closes, leaving the typed text alone.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::TestSupportExt as _;
 use gpui_kit::{
     Anchor, AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     Point, SharedString, StatefulInteractiveElement as _, Styled as _, Window, deferred, div, px,
@@ -17,6 +18,36 @@ use super::toolbar::OVERLAY_PRIORITY;
 use super::theme::ActiveEditorTheme;
 use super::ui;
 use super::view::NotionEditor;
+
+/// Suggestions supplied by an embedding application. Labels and tags are
+/// opaque; choosing a row never edits the document in this renderer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplicationMenu {
+    pub anchor: ApplicationMenuAnchor,
+    pub items: Vec<super::toolbar::ToolbarItem>,
+    pub selected: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplicationMenuAnchor {
+    Caret,
+    Block(usize),
+}
+
+#[derive(Default)]
+pub(crate) enum MenuSource {
+    #[default]
+    BuiltIn,
+    Application(Option<ApplicationMenu>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuAction {
+    Select(usize),
+    Pick(SharedString),
+    Dismiss,
+    Open(char),
+}
 
 /// An open suggestion menu.
 pub struct SuggestionMenu {
@@ -71,8 +102,24 @@ fn group_rank(group: &str) -> usize {
 }
 
 impl NotionEditor {
+    /// Supply the application's menu; None keeps application ownership with
+    /// no open menu. Standalone editors use their built-in menus by default.
+    pub fn set_application_menu(&mut self, menu: Option<ApplicationMenu>, cx: &mut Context<Self>) {
+        let unchanged =
+            matches!(&self.menu_source, MenuSource::Application(current) if current == &menu);
+        if unchanged {
+            return;
+        }
+        self.menu_source = MenuSource::Application(menu);
+        self.suggestion = None;
+        cx.notify();
+    }
+
     pub fn suggestion_is_open(&self) -> bool {
-        self.suggestion.is_some()
+        match &self.menu_source {
+            MenuSource::BuiltIn => self.suggestion.is_some(),
+            MenuSource::Application(menu) => menu.is_some(),
+        }
     }
 
     /// Kept for the `/` affordances: the gutter `+` and `Mod+/`.
@@ -90,8 +137,19 @@ impl NotionEditor {
     /// Open a menu at the caret, typing its trigger character if it is not
     /// already there — what the gutter `+`, `Mod+/` and the menu's own
     /// Mention and Emoji entries do.
-    pub fn open_suggestion(&mut self, trigger: Trigger, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(ix) = self.active_index() else { return };
+    pub fn open_suggestion(
+        &mut self,
+        trigger: Trigger,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let MenuSource::Application(_) = &self.menu_source {
+            cx.emit(MenuAction::Open(trigger.character()));
+            return;
+        }
+        let Some(ix) = self.active_index() else {
+            return;
+        };
         if !self.spec_at(ix, cx).caps().input_rules {
             return;
         }
@@ -120,6 +178,12 @@ impl NotionEditor {
     }
 
     pub fn close_suggestion_menu(&mut self, cx: &mut Context<Self>) {
+        if let MenuSource::Application(menu) = &self.menu_source {
+            if menu.is_some() {
+                cx.emit(MenuAction::Dismiss);
+            }
+            return;
+        }
         if self.suggestion.take().is_some() {
             cx.notify();
         }
@@ -127,6 +191,9 @@ impl NotionEditor {
 
     /// Called after every edit: open on a fresh trigger, or re-read the query.
     pub(crate) fn sync_suggestion_menu(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        if let MenuSource::Application(_) = &self.menu_source {
+            return;
+        }
         let Some(ix) = self.active_index() else {
             self.suggestion = None;
             return;
@@ -255,6 +322,21 @@ impl NotionEditor {
     }
 
     pub fn move_suggestion_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if let MenuSource::Application(menu) = &mut self.menu_source {
+            let Some(menu) = menu else {
+                return;
+            };
+            if menu.items.is_empty() {
+                return;
+            }
+            menu.selected = menu
+                .selected
+                .saturating_add_signed(delta)
+                .min(menu.items.len() - 1);
+            cx.emit(MenuAction::Select(menu.selected));
+            cx.notify();
+            return;
+        }
         let count = self.suggestion_items(cx).len();
         let Some(menu) = &mut self.suggestion else {
             return;
@@ -267,6 +349,13 @@ impl NotionEditor {
     }
 
     pub fn confirm_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let MenuSource::Application(menu) = &self.menu_source {
+            let Some(item) = menu.as_ref().and_then(|menu| menu.items.get(menu.selected)) else {
+                return;
+            };
+            cx.emit(MenuAction::Pick(item.tag.clone()));
+            return;
+        }
         let items = self.suggestion_items(cx);
         let Some(menu) = self.suggestion.take() else {
             return;
@@ -318,10 +407,71 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(menu) = &mut self.suggestion {
-            menu.selected = index;
+        match &mut self.menu_source {
+            MenuSource::Application(Some(menu)) => menu.selected = index,
+            MenuSource::Application(None) => return,
+            MenuSource::BuiltIn => {
+                if let Some(menu) = &mut self.suggestion {
+                    menu.selected = index;
+                }
+            }
         }
         self.confirm_suggestion(window, cx);
+    }
+
+    fn render_application_menu(
+        &self,
+        menu: &ApplicationMenu,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if menu.items.is_empty() {
+            return None;
+        }
+        let theme = cx.editor_theme().clone();
+        let gap = theme.rems(0.375);
+        let position = match menu.anchor {
+            ApplicationMenuAnchor::Caret => {
+                let ix = self.active_index()?;
+                let (caret, line_height) = self.blocks[ix].state.read(cx).cursor_layout()?;
+                caret.origin + Point::new(px(0.), line_height + gap)
+            }
+            ApplicationMenuAnchor::Block(index) => {
+                let bounds = self.block_bounds(self.blocks.get(index)?.id)?;
+                Point::new(bounds.left(), bounds.bottom() + gap)
+            }
+        };
+        let rows = menu
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                ui::menu_row(index == menu.selected, cx)
+                    .id(("application-suggestion", index))
+                    .test_support()
+                    .child(item.label.clone())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.run_suggestion_item(index, window, cx)
+                    }))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        Some(
+            deferred(
+                gpui_kit::base::Positioner::corner(Anchor::TopLeft, position)
+                    .margin(theme.rems(0.5))
+                    .occlude()
+                    .child(
+                        ui::popover_surface(cx)
+                            .w(theme.rems(20.))
+                            .max_h(theme.rems(22.5))
+                            .id("application-suggestion-menu")
+                            .overflow_y_scroll()
+                            .children(rows),
+                    ),
+            )
+            .with_priority(OVERLAY_PRIORITY)
+            .into_any_element(),
+        )
     }
 
     /// The menu, anchored under the caret.
@@ -330,6 +480,9 @@ impl NotionEditor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if let MenuSource::Application(menu) = &self.menu_source {
+            return self.render_application_menu(menu.as_ref()?, cx);
+        }
         let menu = self.suggestion.as_ref()?;
         let ix = self.index_of(menu.block)?;
         let state = self.blocks[ix].state.read(cx);

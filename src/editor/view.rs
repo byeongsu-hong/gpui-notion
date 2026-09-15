@@ -2,7 +2,7 @@
 //! them. State lives in one entity, the way GPUI wants it; each block owns a
 //! child `EditorState` entity for its own text.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -30,6 +30,9 @@ use super::theme::ActiveEditorTheme;
 
 /// Emitted when the document changes, so a host can persist it.
 pub struct DocumentChanged;
+
+/// The focused block's caret or selection changed without editing text.
+pub struct SelectionChanged;
 
 pub struct NotionEditor {
     pub(crate) blocks: Vec<Block>,
@@ -63,6 +66,7 @@ pub struct NotionEditor {
     pub(crate) wrap_width: Pixels,
     /// The open suggestion menu, if any.
     pub(crate) suggestion: Option<super::slash::SuggestionMenu>,
+    pub(crate) menu_source: super::slash::MenuSource,
     /// People offered by the `@` menu.
     pub(crate) mentions: Vec<super::suggestion::Mention>,
     /// Where a dragged block would land.
@@ -95,6 +99,7 @@ impl NotionEditor {
             selected: Vec::new(),
             wrap_width: cx.editor_theme().page_width - cx.editor_theme().page_padding * 2.,
             suggestion: None,
+            menu_source: Default::default(),
             mentions: super::suggestion::default_mentions(),
             drop_target: None,
             link_editor: None,
@@ -427,19 +432,53 @@ impl NotionEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<gpui_kit::Subscription> {
-        vec![cx.subscribe_in(
-            state,
-            window,
-            move |this, _state, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => this.on_block_changed(id, window, cx),
-                InputEvent::Focus => {
-                    this.focused = Some(id);
-                    this.selected.clear();
-                    cx.notify();
-                }
-                _ => {}
-            },
-        )]
+        let mut selection = (state.read(cx).cursor(), state.read(cx).selected_range());
+        let observation = cx.observe_in(state, window, move |this, state, window, cx| {
+            let input = state.read(cx);
+            let next = (input.cursor(), input.selected_range());
+            let unchanged = next == selection;
+            if unchanged {
+                return;
+            }
+            selection = next;
+            let focused = state.focus_handle(cx).is_focused(window);
+            if !focused {
+                return;
+            }
+            let Some(block) = this.block(id) else {
+                return;
+            };
+            let text_settled = input.value().as_str() == block.text.as_str();
+            if !text_settled {
+                return;
+            }
+            let composing = state.update(cx, |state, cx| {
+                use gpui_kit::EntityInputHandler as _;
+                state.marked_text_range(window, cx).is_some()
+            });
+            if composing {
+                return;
+            }
+            this.focused = Some(id);
+            cx.emit(SelectionChanged);
+        });
+        vec![
+            observation,
+            cx.subscribe_in(
+                state,
+                window,
+                move |this, _state, event: &InputEvent, window, cx| match event {
+                    InputEvent::Change => this.on_block_changed(id, window, cx),
+                    InputEvent::Focus => {
+                        this.focused = Some(id);
+                        this.selected.clear();
+                        cx.emit(SelectionChanged);
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            ),
+        ]
     }
 
     /// Insert a block at `ix` and return its id.
@@ -1115,8 +1154,11 @@ impl NotionEditor {
         let editor = cx.entity().downgrade();
         canvas(
             move |bounds, _window, cx| {
-                let _ = editor.update(cx, |this, _| {
-                    this.block_bounds.insert(id, bounds);
+                let _ = editor.update(cx, |this, cx| {
+                    let changed = this.block_bounds.insert(id, bounds) != Some(bounds);
+                    if changed {
+                        cx.notify();
+                    }
                 });
             },
             |_, _, _, _| {},
@@ -1217,6 +1259,8 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
 }
 
 impl EventEmitter<DocumentChanged> for NotionEditor {}
+impl EventEmitter<SelectionChanged> for NotionEditor {}
+impl EventEmitter<super::slash::MenuAction> for NotionEditor {}
 impl EventEmitter<super::toolbar::ToolbarAction> for NotionEditor {}
 impl EventEmitter<super::comments::AnnotationRequested> for NotionEditor {}
 
@@ -1231,13 +1275,13 @@ impl Render for NotionEditor {
         self.sync_input_insets(window, cx);
         let in_a_block = self.refresh_focus(window, cx);
         self.refresh_focused_cell(in_a_block, window, cx);
-        // Block bounds are re-reported by every block that lays out this
-        // frame, so blocks that went away leave nothing behind.
-        self.block_bounds.clear();
-
         let visible: Vec<usize> = (0..self.blocks.len())
             .filter(|ix| self.is_visible(*ix))
             .collect();
+        // Keep the last measured positions until layout reports this frame's
+        // bounds. Hidden and removed blocks cannot anchor an overlay.
+        let visible_ids: HashSet<_> = visible.iter().map(|ix| self.blocks[*ix].id).collect();
+        self.block_bounds.retain(|id, _| visible_ids.contains(id));
         let blocks: Vec<AnyElement> = visible
             .into_iter()
             .map(|ix| self.render_block(ix, window, cx))
