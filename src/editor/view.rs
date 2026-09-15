@@ -71,6 +71,8 @@ pub struct NotionEditor {
     pub(crate) link_editor: Option<super::toolbar::LinkEditor>,
     /// Undo and redo for the document as a whole.
     pub(crate) history: super::history::History,
+    pub(crate) annotation_mode: super::comments::AnnotationMode,
+    pub(crate) toolbar: Option<Vec<super::toolbar::ToolbarItem>>,
 }
 
 impl NotionEditor {
@@ -97,6 +99,8 @@ impl NotionEditor {
             drop_target: None,
             link_editor: None,
             history: super::history::History::default(),
+            annotation_mode: Default::default(),
+            toolbar: None,
             theme: Vec::new(),
         };
         // Mark colours are baked into the decoration layer when they are
@@ -1213,6 +1217,8 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
 }
 
 impl EventEmitter<DocumentChanged> for NotionEditor {}
+impl EventEmitter<super::toolbar::ToolbarAction> for NotionEditor {}
+impl EventEmitter<super::comments::AnnotationRequested> for NotionEditor {}
 
 impl Focusable for NotionEditor {
     fn focus_handle(&self, _: &App) -> FocusHandle {

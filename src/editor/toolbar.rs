@@ -19,6 +19,17 @@ use super::ui::{self, Lucide};
 /// Stacking order of the editor's own overlays.
 pub(crate) const OVERLAY_PRIORITY: usize = 100;
 
+/// A toolbar item owned by an embedding application's interaction model.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolbarItem {
+    pub tag: SharedString,
+    pub label: SharedString,
+}
+/// The host returns a selected tag without applying an editing policy.
+pub struct ToolbarAction {
+    pub tag: SharedString,
+}
+
 /// The link editor opened from the toolbar.
 pub struct LinkEditor {
     pub block: BlockId,
@@ -28,8 +39,32 @@ pub struct LinkEditor {
 }
 
 impl super::view::NotionEditor {
+    /// Replace the toolbar. None selects the standalone editor's toolbar.
+    pub fn set_toolbar(&mut self, items: Option<Vec<ToolbarItem>>, cx: &mut Context<Self>) {
+        if self.toolbar == items {
+            return;
+        }
+        self.toolbar = items;
+        cx.notify();
+    }
+    pub fn choose_toolbar_action(&mut self, tag: &str, cx: &mut Context<Self>) {
+        let Some(item) = self
+            .toolbar
+            .as_ref()
+            .and_then(|items| items.iter().find(|item| item.tag.as_ref() == tag))
+        else {
+            return;
+        };
+        cx.emit(ToolbarAction {
+            tag: item.tag.clone(),
+        });
+    }
+
     /// Whether the selection toolbar should be on screen.
     pub fn selection_toolbar_visible(&self, cx: &App) -> bool {
+        if self.toolbar.as_ref().is_some_and(Vec::is_empty) {
+            return false;
+        }
         if self.suggestion_is_open() || self.drop_target.is_some() {
             return false;
         }
@@ -68,7 +103,7 @@ impl super::view::NotionEditor {
     /// The toolbar, anchored above the selection.
     pub(crate) fn render_selection_toolbar(
         &self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.selection_toolbar_visible(cx) {
@@ -76,6 +111,36 @@ impl super::view::NotionEditor {
         }
         let position = self.toolbar_anchor(cx)?;
 
+        if let Some(items) = &self.toolbar {
+            let toolbar = ui::popover_surface(cx)
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .max_w(window.viewport_size().width - cx.editor_theme().rems(2.))
+                .items_center()
+                .gap(cx.editor_theme().rems(0.125))
+                .p(cx.editor_theme().rems(0.25))
+                .children(items.iter().enumerate().map(|(index, item)| {
+                    let tag = item.tag.clone();
+                    Button::new(("guest-toolbar", index))
+                        .ghost()
+                        .small()
+                        .label(item.label.clone())
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.choose_toolbar_action(&tag, cx)),
+                        )
+                }));
+            return Some(
+                deferred(
+                    gpui_kit::base::Positioner::corner(Anchor::BottomLeft, position)
+                        .margin(cx.editor_theme().rems(0.5))
+                        .occlude()
+                        .child(toolbar),
+                )
+                .with_priority(OVERLAY_PRIORITY)
+                .into_any_element(),
+            );
+        }
         let focus = self.focus_handle_for_editor();
         let code_active = self.is_mark_active(&MarkKind::Code, cx);
 

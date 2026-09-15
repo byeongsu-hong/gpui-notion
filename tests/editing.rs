@@ -2056,3 +2056,60 @@ fn the_document_settles_and_stops_moving(cx: &mut TestAppContext) {
         "the block never stopped moving: {settled:#?}"
     );
 }
+
+#[gpui_kit::test]
+fn guest_toolbar_dispatches_only_declared_actions_without_changing_document(
+    cx: &mut TestAppContext,
+) {
+    use gpui_notion::editor::toolbar::{ToolbarAction, ToolbarItem};
+    let harness = setup(cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = events.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&harness.editor, move |_, action: &ToolbarAction, _| {
+            observed.borrow_mut().push(action.tag.to_string())
+        })
+    });
+    harness.ui(cx, |_, cx| {
+        harness.editor.update(cx, |editor, cx| {
+            let before = editor.content();
+            editor.set_toolbar(
+                Some(vec![ToolbarItem {
+                    tag: "custom-action".into(),
+                    label: "Review selection".into(),
+                }]),
+                cx,
+            );
+            editor.choose_toolbar_action("missing", cx);
+            editor.choose_toolbar_action("custom-action", cx);
+            assert_eq!(editor.content(), before);
+        })
+    });
+    assert_eq!(&*events.borrow(), &["custom-action"]);
+}
+
+#[gpui_kit::test]
+fn external_annotations_emit_selection_without_private_threads(cx: &mut TestAppContext) {
+    use gpui_notion::editor::comments::{AnnotationMode, AnnotationRequested};
+    let harness = setup(cx);
+    harness.type_text("hello world", cx);
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = events.clone();
+    let _subscription = cx.update(|cx| {
+        cx.subscribe(&harness.editor, move |_, event: &AnnotationRequested, _| {
+            observed.borrow_mut().push(event.clone())
+        })
+    });
+    harness.ui(cx, |window, cx| {
+        harness.editor.update(cx, |editor, cx| {
+            editor.set_annotation_mode(AnnotationMode::External);
+            editor.select_text_in_block(0, 0..5, window, cx);
+            let before = editor.content();
+            editor.add_comment(window, cx);
+            assert_eq!(editor.content(), before);
+            assert!(!editor.comment_draft_is_open());
+        })
+    });
+    assert_eq!(events.borrow().len(), 1);
+    assert_eq!(events.borrow()[0].range, 0..5);
+}

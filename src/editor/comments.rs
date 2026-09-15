@@ -22,6 +22,21 @@ use super::toolbar::OVERLAY_PRIORITY;
 use super::ui;
 use super::view::{DocumentChanged, NotionEditor};
 
+/// Select who owns annotation storage and presentation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnnotationMode {
+    #[default]
+    Toolkit,
+    External,
+}
+
+/// An annotation gesture over the current native selection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnnotationRequested {
+    pub block: BlockId,
+    pub range: std::ops::Range<usize>,
+}
+
 /// Identity of a thread, stable across edits because the mark carries it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ThreadId(pub u64);
@@ -122,6 +137,10 @@ impl NotionEditor {
         self.comment_draft.is_some()
     }
 
+    pub fn set_annotation_mode(&mut self, mode: AnnotationMode) {
+        self.annotation_mode = mode;
+    }
+
     /// Start a thread on the selection — the toolbar's Comment button and
     /// `Mod+Shift+M`.
     pub fn add_comment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -133,6 +152,10 @@ impl NotionEditor {
         }
         let Some(ix) = self.index_of(block) else { return };
 
+        if self.annotation_mode == AnnotationMode::External {
+            cx.emit(AnnotationRequested { block, range });
+            return;
+        }
         let id = ThreadId(self.next_thread_id);
         self.next_thread_id += 1;
         let quote: String = self.blocks[ix].text[range.clone()].to_string();
