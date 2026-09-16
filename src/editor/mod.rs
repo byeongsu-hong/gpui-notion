@@ -35,7 +35,7 @@ pub use fit::InputFit;
 pub use grid::{Cell, CellGrid, CellPosition, table_content};
 pub use mark::{HighlightColor, Mark, MarkKind, MarkList, TextColor};
 pub use theme::{ActiveEditorTheme, EditorTheme, HeadingStyle, HighlightPalette, TextPalette};
-pub use view::NotionEditor;
+pub use view::{DocumentChanged, LinkPressed, NotionEditor};
 
 /// Initialise the editor: tokens, node types, actions and key bindings.
 ///

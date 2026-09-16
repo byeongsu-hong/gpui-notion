@@ -524,6 +524,52 @@ fn the_link_editor_sets_a_link_on_the_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn pressing_a_link_hands_its_href_to_the_host(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let pressed: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let sink = pressed.clone();
+    cx.update(|cx| {
+        cx.subscribe(
+            &harness.editor,
+            move |_, event: &gpui_notion::editor::LinkPressed, _| {
+                sink.borrow_mut().push(event.0.to_string())
+            },
+        )
+        .detach()
+    });
+
+    harness.type_text("tiptap", cx);
+    harness.press("shift-home", cx);
+    harness.press("secondary-shift-k", cx);
+    harness.type_text("tiptap.dev", cx);
+    harness.press("enter", cx);
+    assert!(pressed.borrow().is_empty(), "writing a link is not pressing it");
+
+    harness.ui(cx, |window, cx| window.click(("block", 1usize), cx));
+    assert_eq!(pressed.borrow().as_slice(), ["https://tiptap.dev"]);
+}
+
+#[gpui_kit::test]
+fn pressing_plain_text_hands_the_host_nothing(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let pressed: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let sink = pressed.clone();
+    cx.update(|cx| {
+        cx.subscribe(
+            &harness.editor,
+            move |_, event: &gpui_notion::editor::LinkPressed, _| {
+                sink.borrow_mut().push(event.0.to_string())
+            },
+        )
+        .detach()
+    });
+
+    harness.type_text("tiptap", cx);
+    harness.ui(cx, |window, cx| window.click(("block", 1usize), cx));
+    assert!(pressed.borrow().is_empty());
+}
+
+#[gpui_kit::test]
 fn pasted_lines_become_blocks(cx: &mut TestAppContext) {
     let harness = setup(cx);
     harness.ui(cx, |window, cx| {
