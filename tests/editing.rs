@@ -524,6 +524,33 @@ fn the_link_editor_sets_a_link_on_the_selection(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn setting_a_link_tells_the_host_the_document_changed(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    let changes: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
+    let counter = changes.clone();
+    cx.update(|cx| {
+        cx.subscribe(
+            &harness.editor,
+            move |_, _: &gpui_notion::editor::DocumentChanged, _| {
+                counter.set(counter.get() + 1)
+            },
+        )
+        .detach()
+    });
+
+    harness.type_text("tiptap", cx);
+    let typed = changes.get();
+    harness.press("shift-home", cx);
+    harness.press("secondary-shift-k", cx);
+    harness.type_text("tiptap.dev", cx);
+    harness.press("enter", cx);
+
+    // Without this the link lives only in the editor: the host keeps the text
+    // it was last told about, and the next install drops the mark.
+    assert!(changes.get() > typed, "setting a link is a document change");
+}
+
+#[gpui_kit::test]
 fn pressing_a_link_hands_its_href_to_the_host(cx: &mut TestAppContext) {
     let harness = setup(cx);
     let pressed: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();

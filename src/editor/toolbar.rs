@@ -327,6 +327,10 @@ impl super::view::NotionEditor {
         let Some(ix) = self.index_of(editor.block) else {
             return;
         };
+        // Setting a link is an edit like any other mark: undo must reach it,
+        // and a host must be told, or the link lives only until the document
+        // is next installed from the text the host kept.
+        self.record(super::history::Step::Structural, cx);
         if href.trim().is_empty() {
             self.blocks[ix]
                 .marks
@@ -343,6 +347,7 @@ impl super::view::NotionEditor {
             window,
             cx,
         );
+        cx.emit(super::view::DocumentChanged);
         cx.notify();
     }
 
