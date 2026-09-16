@@ -97,7 +97,11 @@ impl NotionEditor {
             .flex()
             .items_center()
             .gap(theme.rems(0.125));
-        if !self.always_show_gutter {
+        // The controls belong to the block whose menu is open until it closes.
+        // Hover alone would take them away the moment the pointer reached the
+        // menu, leaving an open menu with nothing on screen that opened it.
+        let holds_the_menu = self.gutter_menu == Some(id);
+        if !self.always_show_gutter && !holds_the_menu {
             controls = controls
                 .invisible()
                 .group_hover(group_name(id), |this| this.visible());
@@ -129,7 +133,11 @@ impl NotionEditor {
                 )
                 .dropdown_menu(move |menu, window, cx| {
                     block_menu(id, label.clone(), focus.clone(), is_table, menu, window, cx)
-                }),
+                })
+                .on_open_change(cx.listener(move |this, open: &bool, _, cx| {
+                    this.gutter_menu = open.then_some(id);
+                    cx.notify();
+                })),
             )
             .into_any_element()
     }
@@ -202,6 +210,12 @@ impl NotionEditor {
     /// The drop target, for tests that check a drag cleaned up after itself.
     pub fn drop_target_for_test(&self) -> Option<DropTarget> {
         self.drop_target
+    }
+
+    /// The block holding an open gutter menu, for tests that check the
+    /// controls outlive the pointer.
+    pub fn gutter_menu_for_test(&self) -> Option<BlockId> {
+        self.gutter_menu
     }
 
     pub(crate) fn drop_indicator(&self, ix: usize, cx: &App) -> Option<impl IntoElement> {

@@ -77,6 +77,9 @@ pub struct NotionEditor {
     pub(crate) mentions: Vec<super::suggestion::Mention>,
     /// Where a dragged block would land.
     pub(crate) drop_target: Option<super::gutter::DropTarget>,
+    /// The block whose gutter menu is open. Its controls are hover-shown, and
+    /// reaching for the menu takes the pointer off them.
+    pub(crate) gutter_menu: Option<BlockId>,
     /// The open link editor, if any.
     pub(crate) link_editor: Option<super::toolbar::LinkEditor>,
     /// Undo and redo for the document as a whole.
@@ -109,6 +112,7 @@ impl NotionEditor {
             input_rule_mode: Default::default(),
             mentions: super::suggestion::default_mentions(),
             drop_target: None,
+            gutter_menu: None,
             link_editor: None,
             history: super::history::History::default(),
             annotation_mode: Default::default(),
@@ -219,7 +223,7 @@ impl NotionEditor {
                 let spec = registry.get(&block.ty);
                 let show = spec.placeholder_always() || self.focused == Some(block.id);
                 let text = if show {
-                    spec.placeholder(&block.attrs)
+                    placeholder_of(&spec, &block.attrs)
                 } else {
                     SharedString::default()
                 };
@@ -397,6 +401,16 @@ impl NotionEditor {
         self.blocks.iter().map(|b| b.content()).collect()
     }
 
+    /// The hint a block is showing, for tests that check which one it takes.
+    pub fn placeholder_at(&self, ix: usize, cx: &App) -> SharedString {
+        self.blocks[ix]
+            .state
+            .read(cx)
+            .presentation()
+            .placeholder()
+            .clone()
+    }
+
     // ------------------------------------------------------- block lifecycle
 
     fn new_id(&mut self) -> BlockId {
@@ -415,7 +429,7 @@ impl NotionEditor {
     ) -> Entity<EditorState> {
         let spec = BlockRegistry::global(cx).get(ty);
         let caps = spec.caps();
-        let placeholder = spec.placeholder(attrs);
+        let placeholder = placeholder_of(&spec, attrs);
         let language = attrs
             .language
             .clone()
@@ -1209,6 +1223,17 @@ pub enum Caret {
 
 pub(crate) fn group_name(id: BlockId) -> SharedString {
     SharedString::from(format!("block-{}", id.0))
+}
+
+/// The hint an empty block shows. A block may name its own: an application
+/// that reuses a built-in type for something of its own — a page title drawn
+/// on a heading — has no other way to say so, because the spec belongs to
+/// every block of that type and sees nothing but the attributes.
+fn placeholder_of(spec: &Arc<dyn BlockSpec>, attrs: &BlockAttrs) -> SharedString {
+    attrs
+        .extra("placeholder")
+        .cloned()
+        .unwrap_or_else(|| spec.placeholder(attrs))
 }
 
 /// Turn a run's marks into the style the decoration layer paints.

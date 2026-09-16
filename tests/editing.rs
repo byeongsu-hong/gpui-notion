@@ -2310,3 +2310,64 @@ fn application_input_rules_leave_typed_and_pasted_source_unchanged(cx: &mut Test
     assert_eq!(harness.texts(cx), vec!["first", "# second"]);
     assert_eq!(harness.types(cx), vec!["paragraph", "paragraph"]);
 }
+
+#[gpui_kit::test]
+fn a_block_names_its_own_placeholder(cx: &mut TestAppContext) {
+    use gpui_notion::editor::block::BlockAttrs;
+
+    let harness = setup(cx);
+    harness.ui(cx, |window, cx| {
+        harness.editor.update(cx, |editor, cx| {
+            let mut attrs = BlockAttrs::level(1);
+            attrs
+                .extra
+                .insert("placeholder".into(), "Untitled".into());
+            let named = BlockContent::new(types::HEADING, "").with_attrs(attrs);
+            editor.insert_block(0, named, window, cx);
+            let plain = BlockContent::new(types::HEADING, "").with_attrs(BlockAttrs::level(1));
+            editor.insert_block(1, plain, window, cx);
+        })
+    });
+
+    cx.update(|cx| {
+        let editor = harness.editor.read(cx);
+        assert_eq!(editor.placeholder_at(0, cx).as_ref(), "Untitled");
+        assert_eq!(editor.placeholder_at(1, cx).as_ref(), "Heading 1");
+    });
+}
+
+#[gpui_kit::test]
+fn the_gutter_stays_with_the_menu_it_opened(cx: &mut TestAppContext) {
+    let harness = setup(cx);
+    harness.type_text("one", cx);
+    harness.press("enter", cx);
+    harness.type_text("two", cx);
+
+    cx.update_window(harness.window, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover(("block", 1usize), cx);
+        window.render_frame(cx);
+        window.click(("drag", 1usize), cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let holder = cx.update(|cx| harness.editor.read(cx).gutter_menu_for_test());
+    assert_eq!(holder, Some(BlockId(1)), "the handle's block holds the menu");
+
+    // The pointer walking to another line must not take the open menu's own
+    // controls away — that is the whole defect.
+    cx.update_window(harness.window, |_, window, cx| {
+        window.hover(("block", 2usize), cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.update(|cx| harness.editor.read(cx).gutter_menu_for_test()),
+        Some(BlockId(1)),
+        "hovering elsewhere does not close the menu"
+    );
+}
