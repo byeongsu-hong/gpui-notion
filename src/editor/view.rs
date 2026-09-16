@@ -31,6 +31,11 @@ use super::theme::ActiveEditorTheme;
 /// Emitted when the document changes, so a host can persist it.
 pub struct DocumentChanged;
 
+/// Emitted when a reader presses a link, carrying its href. The editor has no
+/// opinion on what an href names — a page in the host's own workspace as
+/// readily as a web address — so opening one is the host's call.
+pub struct LinkPressed(pub SharedString);
+
 pub struct NotionEditor {
     pub(crate) blocks: Vec<Block>,
     next_id: u64,
@@ -1213,6 +1218,7 @@ pub(crate) fn highlight_style(kinds: &[MarkKind], cx: &App) -> HighlightStyle {
 }
 
 impl EventEmitter<DocumentChanged> for NotionEditor {}
+impl EventEmitter<LinkPressed> for NotionEditor {}
 
 impl Focusable for NotionEditor {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -1254,6 +1260,7 @@ impl Render for NotionEditor {
                 cx.listener(|this, event: &gpui_kit::MouseDownEvent, window, cx| {
                     this.close_suggestion_menu(cx);
                     this.open_thread_for_press(event, window, cx);
+                    this.open_link_for_press(event, window, cx);
                 }),
             )
             .capture_any_mouse_down(cx.listener(Self::on_page_mouse_down))

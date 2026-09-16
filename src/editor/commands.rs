@@ -11,7 +11,7 @@ use gpui_kit::{App, Context, SharedString, Window};
 use super::block::{BlockAttrs, BlockContent, BlockId, BlockRegistry, BlockType, types};
 use super::mark::{Edit, HighlightColor, MarkKind, TextColor};
 use super::history::Step;
-use super::view::{Caret, DocumentChanged, NotionEditor};
+use super::view::{Caret, DocumentChanged, LinkPressed, NotionEditor};
 
 impl NotionEditor {
     // ----------------------------------------------------------------- marks
@@ -223,6 +223,44 @@ impl NotionEditor {
             MarkKind::Link(href) => Some((mark.range.clone(), href.clone())),
             _ => None,
         }
+    }
+
+    /// A press inside a link opens it, the way a reader expects a link to
+    /// behave; the caret still lands where it was pressed, so the run stays
+    /// editable. Deferred because the input moves its own caret while
+    /// handling this press — where it ended up is only true a frame later.
+    pub(crate) fn open_link_for_press(
+        &mut self,
+        event: &gpui_kit::MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(block) = self.block_at_point(event.position) else {
+            return;
+        };
+        let editor = cx.entity();
+        window.defer(cx, move |_window, cx| {
+            editor.update(cx, |this, cx| {
+                let Some(href) = this.link_at_offset(block, cx) else {
+                    return;
+                };
+                cx.emit(LinkPressed(href));
+            });
+        });
+    }
+
+    /// The link covering a block's caret, which is where a press just put it.
+    fn link_at_offset(&self, block: BlockId, cx: &App) -> Option<SharedString> {
+        let ix = self.index_of(block)?;
+        let caret = self.blocks[ix].state.read(cx).cursor();
+        self.blocks[ix]
+            .marks
+            .active(&(caret..caret))
+            .into_iter()
+            .find_map(|kind| match kind {
+                MarkKind::Link(href) => Some(href),
+                _ => None,
+            })
     }
 
     /// Tiptap `unsetAllMarks` — the template's "Reset formatting".
